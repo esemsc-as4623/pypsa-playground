@@ -23,7 +23,7 @@ n = pypsa.examples.scigrid_de(from_master=True)
 
 # Print the buses (nodes) in the network.
 # `n.buses` is a pandas DataFrame where each row represents a bus (a specific location or substation in the grid).
-# Columns contain information like voltage level, location (x, y coordinates), etc.
+# Columns contain information (e.g. voltage level, location (x, y coordinates), etc.).
 print(n.buses)
 
 # --- Security Constraints and Network Pre-processing ---
@@ -58,7 +58,7 @@ print(n.lines)
 # indicates time-varying data.
 # `p_set` is the active power demand that must be met at each time step.
 # `.sum(axis=1)` aggregates the demand from all different locations into a single total for each hour.
-# `.div(1e3)` converts the units from MW to GW for easier readability.
+# `.div(1e3)` converts the units from MW to GW.
 plt.figure()
 n.loads_t.p_set.sum(axis=1).div(1e3).plot(ylim=[0, 60], ylabel="MW")
 plt.tight_layout()
@@ -92,7 +92,7 @@ load = n.loads_t.p_set.sum(axis=0).groupby(n.loads.bus).sum()
 fig = plt.figure()
 # We use a map projection (EqualEarth) for a more accurate geographical representation.
 ax = plt.axes(projection=ccrs.EqualEarth())
-# `n.plot.map()` is a powerful PyPSA function to plot the network on a map.
+# `n.plot.map()` is a PyPSA function to plot the network on a map.
 # We use the `bus_sizes` argument to represent the magnitude of the load at each bus.
 # The size of the circle at each bus location will be proportional to its electricity demand.
 n.plot.map(ax=ax, bus_sizes=load / 2e5)
@@ -105,8 +105,8 @@ capacities = n.generators.groupby(["bus", "carrier"]).p_nom.sum()
 # We get a list of all unique energy carriers to assign them colors for the plot legend.
 carriers = list(n.generators.carrier.unique()) + list(n.storage_units.carrier.unique())
 # Generate a random color for each carrier.
-colors = ["#%06x" % random.randint(0, 0xFFFFFF) for _ in carriers] # generate random colors
-# Add this color information to the network object so PyPSA knows how to color the legend.
+colors = ["#%06x" % random.randint(0, 0xFFFFFF) for _ in carriers]
+# Add this color information to the network object.
 n.add("Carrier", carriers, color=colors, overwrite=True)
 
 fig = plt.figure()
@@ -131,7 +131,7 @@ plt.savefig('scrigrid-de-generation-capacity.png')
 # We relax this constraint to 95% to allow the optimization to find a solution.
 # In a real study, an infeasible result would prompt further investigation into
 # whether there is insufficient generation or transmission capacity in the model.
-n.lines.s_max_pu = 0.95 # infeasible with 0.7 due to insufficient transmission capapcity to deliver generated power
+n.lines.s_max_pu = 0.95
 
 # This is the main command to run the optimization.
 # PyPSA builds a large-scale linear optimization problem that represents the energy system.
