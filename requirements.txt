@@ -22,9 +22,12 @@ google-resumable-media==2.7.2
 googleapis-common-protos==1.70.0
 highspy==1.11.0
 idna==3.10
+jinja2==3.1.6
 kiwisolver==1.4.9
+levenshtein==0.27.1
 linopy==0.5.7
 locket==1.0.0
+markupsafe==3.0.3
 matplotlib==3.10.6
 narwhals==2.7.0
 netcdf4==1.7.2
@@ -42,14 +45,16 @@ proto-plus==1.26.1
 protobuf==6.32.1
 pyasn1==0.6.1
 pyasn1-modules==0.4.2
+pydeck==0.9.1
 pyogrio==0.11.1
 pyparsing==3.2.5
 pyproj==3.7.2
-pypsa==0.35.2
+pypsa==1.0.0
 pyshp==3.0.2.post1
 python-dateutil==2.9.0.post0
 pytz==2025.2
 pyyaml==6.0.3
+rapidfuzz==3.14.1
 requests==2.32.5
 rsa==4.9.1
 scipy==1.16.2
@@ -61,4 +66,4 @@ tqdm==4.67.1
 tzdata==2025.2
 urllib3==2.5.0
 validators==0.35.0
-xarray==2025.10.0
+xarray==2025.9.0
