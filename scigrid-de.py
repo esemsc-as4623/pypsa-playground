@@ -11,15 +11,20 @@ import random
 
 random.seed(42)
 
+save_directory = "scigrid-de"
+
+import os
+if not os.path.exists(save_directory):
+    os.makedirs(save_directory, exist_ok=True)
+
+
 # Load an example PyPSA network model.
 # `pypsa.examples.scigrid_de()` loads a model of the German transmission grid.
 # This model is based on the SciGRID dataset and includes generators, loads,
 # transmission lines, and other components for Germany.
-# The `from_master=True` argument ensures that the latest version of the example
-# dataset is downloaded from the PyPSA GitHub repository.
 # The variable 'n' (short for network) holds the entire energy system model.
 # This network object contains pandas DataFrames for each component type (buses, generators, lines, etc.).
-n = pypsa.examples.scigrid_de(from_master=True)
+n = pypsa.examples.scigrid_de()
 
 # Print the buses (nodes) in the network.
 # `n.buses` is a pandas DataFrame where each row represents a bus (a specific location or substation in the grid).
@@ -62,7 +67,7 @@ print(n.lines)
 plt.figure()
 n.loads_t.p_set.sum(axis=1).div(1e3).plot(ylim=[0, 60], ylabel="MW")
 plt.tight_layout()
-plt.savefig('scrigrid-de-demand.png')
+plt.savefig(f'{save_directory}/demand.png')
 
 # Plot the availability of renewable energy sources over time, known as the "capacity factor".
 # `n.generators_t.p_max_pu` gives the per-unit availability of each generator at each time step.
@@ -74,7 +79,7 @@ plt.savefig('scrigrid-de-demand.png')
 plt.figure()
 n.generators_t.p_max_pu.T.groupby(n.generators.carrier).mean().T.plot(ylabel="p.u.")
 plt.tight_layout()
-plt.savefig('scrigrid-de-capacity-factor.png')
+plt.savefig(f'{save_directory}/capacity-factor.png')
 
 # Plot the total installed generation capacity for each type of energy source (carrier).
 # `n.generators.p_nom` is the nominal (or nameplate) capacity of each individual generator in MW.
@@ -84,7 +89,7 @@ plt.figure()
 n.generators.groupby("carrier").p_nom.sum().div(1e3).plot.barh()
 plt.xlabel("GW")
 plt.tight_layout()
-plt.savefig('scrigrid-de-total-capacity.png')
+plt.savefig(f'{save_directory}/total-capacity.png')
 
 # Plot the geographical distribution of electricity loads at the first time step.
 # We first calculate the total load at each bus.
@@ -97,7 +102,7 @@ ax = plt.axes(projection=ccrs.EqualEarth())
 # The size of the circle at each bus location will be proportional to its electricity demand.
 n.plot.map(ax=ax, bus_sizes=load / 2e5)
 plt.tight_layout()
-plt.savefig('scrigrid-de-load-distribution_t0.png')
+plt.savefig(f'{save_directory}/load-distribution_t0.png')
 
 # Plot the geographical distribution of generation capacity.
 # First, we calculate the total generation capacity at each bus for each carrier.
@@ -116,7 +121,7 @@ n.plot.map(ax=ax, bus_sizes=capacities / 2e4)
 # Add a legend to the map to show which color corresponds to which energy carrier.
 add_legend_patches(ax, colors, carriers, legend_kw=dict(frameon=False, bbox_to_anchor=(0, 1)))
 plt.tight_layout()
-plt.savefig('scrigrid-de-generation-capacity.png')
+plt.savefig(f'{save_directory}/generation-capacity.png')
 
 # --- Optimal Power Flow Simulation ---
 
@@ -166,7 +171,6 @@ n.plot.map(
     ax=ax,
     bus_sizes=0,
     line_colors=line_loading,
-    line_norm=norm,
     line_cmap="plasma",
     line_widths=n.lines.s_nom / 1000,
 )
@@ -180,7 +184,7 @@ plt.colorbar(
 )
 
 plt.tight_layout()
-plt.savefig('scrigrid-de-line-loading.png')
+plt.savefig(f'{save_directory}/line-loading.png')
 
 # Plot the hourly electricity generation (dispatch) from each energy source.
 # `n.generators_t.p` contains the optimized power output of each generator for each hour.
@@ -200,7 +204,7 @@ ax.legend(ncol=5, loc="upper left", frameon=False)
 ax.set_ylabel("GW")
 ax.set_ylim(0, 80)
 plt.tight_layout()
-plt.savefig('scrigrid-de-dispatch-by-carrier.png')
+plt.savefig(f'{save_directory}/dispatch-by-carrier.png')
 
 # Plot the behavior of energy storage units (in this case, pumped hydro).
 # `n.storage_units_t.p` shows the dispatch of storage units. A positive value means discharging (generating electricity),
@@ -218,7 +222,7 @@ ax.grid()
 ax.legend()
 ax.set_ylabel("MWh or MW")
 plt.tight_layout()
-plt.savefig('scrigrid-de-pumped-hydro.png')
+plt.savefig(f'{save_directory}/pumped-hydro.png')
 
 # Plot the Locational Marginal Prices (LMPs).
 # The LMP (or marginal price) at a bus is the cost to supply one additional MWh of electricity
@@ -238,7 +242,6 @@ n.plot.map(
     ax=ax,
     bus_colors=n.buses_t.marginal_price.mean(),
     bus_cmap="plasma",
-    bus_norm=norm,
     bus_alpha=0.7,
 )
 
@@ -250,4 +253,4 @@ plt.colorbar(
     shrink=0.6,
 )
 plt.tight_layout()
-plt.savefig('scrigrid-de-lmp.png')
+plt.savefig(f'{save_directory}/lmp.png')
