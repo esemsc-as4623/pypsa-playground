@@ -1,28 +1,3 @@
-"""
-Scenario Context:
-A small regional utility needs to quickly assess the immediate
-electrical state of a new substation connection. We are setting
-up a simplified, static model of three buses connected by two
-transmission lines, with one conventional generator and a fixed
-demand.
-
-PyPSA Functionalities to Demo:
-
-Network Initialization: pypsa.Network().
-Component Addition: Adding Buses, Lines, Generators, and Loads.
-Static Analysis: Calculating a non-iterative, linear static
-load flow using n.optimize().
-
-Data Access: Retrieving results from component dataframes
-(e.g., generators_t.p, buses_t.v_mag_pu).
-
-What is Achieved:
-The script creates a basic, single-snapshot AC network model.
-It calculates the steady-state power flows in the lines and the
-resulting voltage magnitudes at the buses, demonstrating the
-foundational steps for any PyPSA analysis.
-"""
-
 import pypsa
 import pandas as pd
 import matplotlib.pyplot as plt
