@@ -41,6 +41,14 @@ uv pip freeze > requirements.txt
 uv pip install -r requirements.txt
 ```
 
+Run a demo using snakemake (see examples below).
+Visualize the results
+
+```bash
+python visualizations.py -n results/{CONFIG}/networks/{NAME_OF_RUN}.nc -o {NAME_OF_OUTPUT_FOLDER}
+# e.g. python visualizations.py -n results/test-elec/networks/base_s_6_elec_.nc -o analysis_results/
+```
+
 #### 2A
 
 Run
