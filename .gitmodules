@@ -1,3 +1,3 @@
 [submodule "pypsa-eur"]
 	path = pypsa-eur
-	url = https://github.com/PyPSA/pypsa-eur.git
+	url = https://github.com/esemsc-as4623/pypsa-eur-background.git
