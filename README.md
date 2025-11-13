@@ -24,11 +24,25 @@ cd benchmarks
 
 ### Demo 2: PyPSA-EUR
 
+Set-up Environment
+
+(first time)
 ```bash
 git clone https://github.com/PyPSA/pypsa-eur.git
-cd pypsa-eur
-conda update conda
-conda env create -f envs/environment.yaml
-conda activate pypsa-eur
+# update virtual environment with all additional packages
+python update_requirements.py -f pypsa-eur/envs/update_environment.yaml --continue-on-error # from environment.yaml
+uv pip install -r pypsa-eur/doc/requirements.txt # from requirements.txt
+sudo apt-get install gdal-bin libgdal-dev # add system libraries separatelys
+# update requirements.txt
+uv pip freeze > requirements.txt
+```
+(subsequently)
+```bash
+uv pip install -r requirements.txt
+```
+
+Run
+
+```bash
 snakemake -call results/test-elec/networks/base_s_6_elec_.nc --configfile config/test/config.electricity.yaml
 ```
