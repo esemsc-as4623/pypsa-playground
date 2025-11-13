@@ -14,34 +14,21 @@ uv pip install -r requirements.txt
 python scigrid-de.py`
 ```
 
-### Demo 1: `01.static-network.py`
-
-```bash
-python 01.static-network.py
-
-# TODO: fix plotting
-# grid components to be added to projection (x,y) coords
-# plotting to take projection axes from ccrs
-```
-
-### Demo 2: `02.time-series.py`
-
-### Demo 3: `03.capacity-expansion.py`
-
-### Demo 4: `04.multi-region.py`
-
-### Demo 5: `05.stochastic-programming.py`
-
-### Demo 6: `06.components-class-api.py`
-
-### Demo 7: `07.sector-coupling.py`
-
-### Demo 8: `08.multiple-scenarios.py`
-
-### Demo 9: Benchmarks
+### Demo 1: Benchmarks
 
 Enter the benchmarks subdirectory to view instructions and run
 
 ```bash
 cd benchmarks
+```
+
+### Demo 2: PyPSA-EUR
+
+```bash
+git clone https://github.com/PyPSA/pypsa-eur.git
+cd pypsa-eur
+conda update conda
+conda env create -f envs/environment.yaml
+conda activate pypsa-eur
+snakemake -call results/test-elec/networks/base_s_6_elec_.nc --configfile config/test/config.electricity.yaml
 ```
