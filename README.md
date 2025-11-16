@@ -51,7 +51,7 @@ python visualizations.py -n results/{CONFIG}/networks/{NAME_OF_RUN}.nc -o {NAME_
 
 #### 2A
 
-Run
+##### Run
 
 ```bash
 cd pypsa-eur
@@ -59,7 +59,7 @@ snakemake -call results/test-elec/networks/base_s_6_elec_.nc --configfile config
 ```
 view logs in `.snakemake/log/{2025-11-13T113052.887075}.snakemake.log`.
 
-What just happened?
+##### What just happened?
 1. Executed `scripts/build_line_rating.py`, which calculates dynamic line rating for transmission lines in the power grid.
 - input: base network (.nc) + weather cutout (.nc)
 - process:
@@ -375,3 +375,17 @@ What just happened?
   - `assign_all_duals` = compute shadow prices for all constraints
   - `rolling_horizon` = solve operations in chunks for large time series
   - `check_objective["expected_value"]` = benchmark objective value for validation
+
+##### Visualize
+Run
+
+```bash
+snakemake results/{RUN_NAME}/graphs/costs.svg --cores 'all'
+```
+
+Note that the `{RUN_NAME}` is specified in your config file. In the default case (i.e. `config/config.default.yaml`), the run name is an empty string:
+
+```yaml
+run:
+    name: ""
+```
