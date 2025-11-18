@@ -26,38 +26,27 @@ cd benchmarks
 
 Set-up Environment
 
-(first time)
+Install pixi (https://pixi.sh/dev/installation/)
+
 ```bash
 git clone https://github.com/PyPSA/pypsa-eur.git
-# update virtual environment with all additional packages
-python update_requirements.py -f pypsa-eur/envs/update_environment.yaml --continue-on-error # from environment.yaml
-uv pip install -r pypsa-eur/doc/requirements.txt # from requirements.txt
-sudo apt-get install gdal-bin libgdal-dev # add system libraries separately
-# update requirements.txt
-uv pip freeze > requirements.txt
-```
-(subsequently)
-```bash
-uv pip install -r requirements.txt
+cd pypsa-eur
+pixi shell
 ```
 
-Run a demo using snakemake (see examples below).
-Visualize the results
-
-```bash
-python visualizations.py -n results/{CONFIG}/networks/{NAME_OF_RUN}.nc -o {NAME_OF_OUTPUT_FOLDER}
-# e.g. python visualizations.py -n results/test-elec/networks/base_s_6_elec_.nc -o analysis_results/
-```
-
-#### 2A
+#### 2A: Electricity-Only
 
 ##### Run
 
 ```bash
-cd pypsa-eur
 snakemake -call results/test-elec/networks/base_s_6_elec_.nc --configfile config/test/config.electricity.yaml
 ```
 view logs in `.snakemake/log/{2025-11-13T113052.887075}.snakemake.log`.
+
+For electricity-only studies:
+```bash
+snakemake -call solve_elec_networks
+```
 
 ##### What just happened?
 1. Executed `scripts/build_line_rating.py`, which calculates dynamic line rating for transmission lines in the power grid.
@@ -376,16 +365,128 @@ view logs in `.snakemake/log/{2025-11-13T113052.887075}.snakemake.log`.
   - `rolling_horizon` = solve operations in chunks for large time series
   - `check_objective["expected_value"]` = benchmark objective value for validation
 
-##### Visualize
-Run
+#### 2B: Sector-Coupled
+
+##### Run
 
 ```bash
-snakemake results/{RUN_NAME}/graphs/costs.svg --cores 'all'
+snakemake -call all --configfile config/test/config.overnight.yaml
+```
+view logs in `.snakemake/log/{2025-11-18T154106.291749}.snakemake.log`.
+
+For sector-coupling studies:
+```bash
+snakemake -call solve_sector_networks
 ```
 
-Note that the `{RUN_NAME}` is specified in your config file. In the default case (i.e. `config/config.default.yaml`), the run name is an empty string:
+##### What just happened?
+1. Executed `scripts/retrieve_cost_data.py`
+2. Executed `scripts/build_ammonia_production.py`
+3. ?? jobid: 40 retrieve_lau_regions
+4. Executed `scripts/build_gas_network.py`
+5. ?? jobid: 104 retrieve_aquifer_data_bgr
+6. ?? jobid: 39 retrieve_geothermal_heat_utilisation_potentials.log
+7. Executed `scripts/build_electricity_demand.py`
+8. ?? jobid: 42 retrieve_hera_data_test_cutout
+9. ?? jobid: 44 retrieve_dh_areas
+10. Executed `scripts/build_industrial_production_per_country.py`
+11. Executed `scripts/build_industrial_sector_ratios.py`
+12. Executed `scripts/build_industrial_production_per_country_tomorrow.py`
+13. Executed `scripts/build_ship_raster.py`
+14. Executed `scripts/build_shapes.py`
+15. Executed `scripts/base_network.py`
+16. Executed `scripts/build_energy_totals.py`
+17. Executed `scripts/build_heat_totals.py`
+18. Executed `scripts/build_population_layouts.py`
+19. Executed `scripts/build_transmission_projects.py`
+20. Executed `scripts/build_industrial_energy_demand_per_country_today.py`
+21. Executed `scripts/plot_base_network.py`
+22. Executed `scripts/build_industry_sector_ratios_intermediate.py`
+23. Executed `scripts/add_transmission_projects_and_dlr.py`
+24. Executed `scripts/simplify_network.py`
+25. Executed `scripts/build_electricity_demand_base.py`
+26. Executed `scripts/process_cost_data.py`
+27. Executed `scripts/cluster_network.py`
+28. Executed `scripts/build_clustered_population_layouts.py`
+29. Executed `scripts/build_ambient_air_temperature_yearly_average.py`
+30. Executed `scripts/build_dh_areas.py`
+31. Executed `scripts/determine_availability_matrix.py` (offwind-ac)
+32. Executed `scripts/build_industrial_distribution_key.py`
+33. Executed `scripts/build_gas_input_locations.py`
+34. Executed `scripts/build_geothermal_heat_potential.py`
+35. Executed `scripts/build_salt_cavern_potentials.py`
+36. Executed `scripts/cluster_gas_network.py`
+37. Executed `scripts/build_shipping_demand.py`
+38. Executed `scripts/build_biomass_potentials.py`
+39. Executed `scripts/determine_availability_matrix.py` (offwind-float)
+40. Executed `scripts/plot_heat_source_map.py` (ambient air)
+41. Executed `scripts/plot_power_network_clustered.py`
+42. Executed `scripts/build_population_weighted_energy_totals.py` (heat)
+43. Executed `scripts/determine_availability_matrix.py` (offwind-dc)
+44. Executed `scripts/build_population_weighted_energy_totals.py` (energy)
+45. Executed `scripts/build_temperature_profiles.py`
+46. ?? jobid: 41 build_river_heat_potential
+47. Executed `scripts/build_industrial_energy_demand_per_node_today.py`
+48. Executed `scripts/build_industrial_production_per_node.py`
+49. Executed `scripts/build_powerplants.py`
+50. Executed `scripts/plot_heat_source_map.py` (river water)
+51. Executed `scripts/determine_availability_matrix.py` (solar-hsat)
+52. Executed `scripts/build_transport_demand.py`
+53. ?? jobid: 99 build_central_heating_temperature_profiles
+54. Executed `scripts/build_industrial_energy_demand_per_node.py`
+55. Executed `scripts/build_district_heat_share.py`
+56. Executed `scripts/build_daily_heat_demand.py`
+57. ?? jobid: 100 build_ptes_operations
+58. Executed `scripts/build_direct_heat_source_utilisation_profiles.py`
+59. Executed `scripts/determine_availability_matrix.py` (solar)
+60. Executed `scripts/build_hourly_heat_demand.py`
+61. Executed `scripts/determine_availability_matrix.py` (onwind)
+62. Executed `scripts/build_renewable_profiles.py` (solar)
+63. Executed `scripts/build_ates_potentials.py`
+64. Executed `scripts/build_clustered_solar_rooftop_potentials.py`
+65. Executed `scripts/build_renewable_profiles.py` (solar-hsat)
+66. Executed `scripts/build_renewable_profiles.py` (onwind)
+67. Executed `scripts/retrieve_seawater_temperature.py`
+68. Executed `scripts/build_renewable_profiles.py` (offwind-dc)
+69. ?? jobid: 97 build_sea_heat_potential
+70. ?? jobid: 96 build_cop_profiles
+71. Executed `scripts/plot_heat_source_map.py` (sea water)
+72. ?? jobid: 108 plot_cop_profiles
+73. Executed `scripts/build_renewable_profiles.py` (offwind)
+74. Executed `scripts/build_renewable_profiles.py` (offwind-ac)
+75. Executed `scripts/build_solar_thermal_profiles.py`
+76. Executed `scripts/add_electricity.py`
+77. Executed `scripts/prepare_network.py`
+78. Executed `scripts/time_aggregation.py`
+79. Executed `scripts/prepare_sector_network.py`
+80. ?? jobid: 4 solve_sector_network
+81. Executed `scripts/make_summary.py`
+82. Executed `scripts/plot_interactive_bus_balance.py`
+83. Executed `scripts/plot_balance_map.py` (urban central heat)
+84. Executed `scripts/plot_balance_map.py` (oil)
+85. Executed `scripts/plot_balance_map.py` (gas)
+86. Executed `scripts/plot_balance_map.py` (H2)
+87. Executed `scripts/plot_balance_map.py` (AC)
+88. Executed `scripts/plot_balance_map.py` (methanol)
+89. Executed `scripts/plot_balance_map.py` (CO2 stored)
+90. Executed `scripts/make_global_summary.py`
+91. Executed `scripts/plot_heatmap_timeseries.py`
+92. Executed `scripts/plot_balance_timeseries.py`
+93. Executed `scripts/plot_gas_network.py`
+94. Executed `scripts/plot_hydrogen_network.py`
+95. Executed `scripts/plot_power_network.py`
+96. Executed `scripts/plot_summary.py`
 
-```yaml
-run:
-    name: ""
+#### Visualize
+
+Register profile on cds.climate.copernicus.eu
+Copy URL and KEY generated.
+
+```bash
+touch ~/.cdsapirc
+nano ~/.cdsapirc
+# paste URL and KEY, save, modify buffer, exit
+uv pip install cdsapi
 ```
+
+Run `notebooks/manual-cutouts.ipynb` to manually download the relevant ERA5 cutout.
