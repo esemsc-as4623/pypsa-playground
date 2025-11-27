@@ -7,6 +7,10 @@ def create_argparser():
     """
     parser = argparse.ArgumentParser(description='Command line argument parser')
     
+    # sample_data specific arguments
+    parser.add_argument('-datapath', type=str, help='Data repository directory path')
+    parser.add_argument('-years', type=int, nargs=2, metavar=('START_YEAR', 'END_YEAR'), help='Start and end years to populate YEAR.csv')
+
     # add_nodes.py specific arguments
     parser.add_argument('-n', type=int, help='Number of nodes in the network')
     parser.add_argument('-t', type=int, help='Number of time snapshots')
@@ -22,7 +26,6 @@ def parse_args():
     Parse command line arguments and return as dictionary.
     Returns dict with argument names as keys and values as parsed values.
     """
-
     parser = create_argparser()
     args = parser.parse_args()
     
