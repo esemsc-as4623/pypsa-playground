@@ -1,7 +1,9 @@
 affine==2.4.0
+amply==0.1.6
 annotated-types==0.7.0
 anyio==4.11.0
 appdirs==1.4.4
+appnope==0.1.4
 arcosparse==0.4.2
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0
@@ -68,6 +70,7 @@ fckitlib==0.14.0.5
 filelock==3.20.0
 findlibs==0.1.2
 fiona==1.10.1
+flatten-dict==0.4.2
 folium==0.20.0
 fonttools==4.60.1
 fqdn==1.5.1
@@ -154,6 +157,7 @@ numexpr==2.13.1
 numpy==2.3.3
 oauthlib==3.3.1
 openpyxl==3.1.5
+otoole==1.1.5
 packaging==25.0
 pandas==2.3.3
 pandocfilters==1.5.1
@@ -187,6 +191,7 @@ pycparser==2.23
 pydantic==2.12.4
 pydantic-core==2.41.5
 pydeck==0.9.1
+pydot==4.0.1
 pygments==2.19.2
 pylint==4.0.2
 pyogrio==0.11.1

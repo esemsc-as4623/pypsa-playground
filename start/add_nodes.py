@@ -1,8 +1,6 @@
 import logging
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import pypsa
 
 logger = logging.getLogger(__name__)
@@ -13,7 +11,8 @@ def add_nodes(n, t):
     snapshots = range(t)
 
     n = pypsa.Network()
-    n.set_snapshots(snapshots)
+    n.add("Carrier", "AC", color="lightblue")
     n.add("Bus", buses)
+    n.set_snapshots(snapshots)
 
     return n

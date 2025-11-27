@@ -16,7 +16,7 @@ def add_supply(n, s_scenario):
     Parameters
     ----------
     - n (pypsa.Network): The power system network to which supply is added.
-    - s_scenario (str): The supply scenario, either 'nearly-free' or 'oversupply'.
+    - s_scenario (str): The supply scenario, 'free', 'nearly-free' or 'oversupply'.
 
     Returns
     -------
@@ -25,14 +25,24 @@ def add_supply(n, s_scenario):
     buses = n.buses.index
     snapshots = n.snapshots
 
-    # add (nearly) free, fully available energy generators
-    if s_scenario == "nearly-free":
+    # add free, fully available energy generators
+    if s_scenario == "free":
         n.add("Generator",
             buses,
             suffix = f" {s_scenario}",
             bus = buses,
             p_nom_extendable = True,
-            capital_cost = 1e-8, # optimization does not work with 0 cost
+            capital_cost = 0,
+            p_max_pu = np.ones((len(snapshots), len(buses))))
+
+    # add (nearly) free, fully available energy generators
+    elif s_scenario == "nearly-free":
+        n.add("Generator",
+            buses,
+            suffix = f" {s_scenario}",
+            bus = buses,
+            p_nom_extendable = True,
+            capital_cost = 1e-8,
             p_max_pu = np.ones((len(snapshots), len(buses))))
 
     # add oversupply generators

@@ -1,7 +1,5 @@
 from start import parse_args, add_nodes, add_demand, add_supply, solve_network
 
-import pypsa
-
 if __name__ == "__main__":
     args = parse_args()
 
