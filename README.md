@@ -8,13 +8,37 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
-### Demo 0: `scigrid-de.py`
+All PyPSA dependencies are in requirements.txt.
+OSeMOSYS requires GPLK (GNU Linear Programming Kit)
+- install with conda, brew, or by downloading the distribution tarball
+- once installed, you should be able to call the `glpsol` command
+
+### Start Configs
+
+```bash
+cd start
+otoole setup config osemosys_config.yaml # creates osemosys_config.yaml with prepopulated defaults
+otoole setup csv sample_data
+
+```
+
+### Demo: `simplicity` (OSeMOSYS)
+```bash
+otoole convert csv datafile data simplicity.txt config.yaml
+otoole convert datafile excel simplicity.txt simplicity.xlsx config.yaml
+otoole convert excel csv simplicity.xlsx simplicity config.yaml
+glpsol -m OSeMOSYS.txt -d simplicity.txt --wglp simplicity.glp --write simplicity.sol
+otoole results glpk csv simplicity.sol results-glpk datafile simplicity.txt config.yaml --glpk_model simplicity.glp
+otoole viz res excel simplicity.xlsx res.png config.yaml
+```
+
+### Demo: `scigrid-de.py` (PyPSA)
 
 ```bash
 python scigrid-de.py`
 ```
 
-### Demo 1: Benchmarks
+### Demo: Benchmarks (PyPSA)
 
 Enter the benchmarks subdirectory to view instructions and run
 
@@ -22,7 +46,7 @@ Enter the benchmarks subdirectory to view instructions and run
 cd benchmarks
 ```
 
-### Demo 2: PyPSA-EUR
+### Demo: PyPSA-EUR
 
 Set-up Environment
 
