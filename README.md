@@ -19,7 +19,8 @@ OSeMOSYS requires GPLK (GNU Linear Programming Kit)
 cd start
 otoole setup config osemosys_config.yaml # creates osemosys_config.yaml with prepopulated defaults
 otoole setup csv sample_data
-
+otoole convert csv datafile sample_data osemosys_demo.txt osemosys_config.yaml
+otoole convert datafile excel osemosys_demo.txt sample_data.xlsx osemosys_config.yaml
 ```
 
 ### Demo: `simplicity` (OSeMOSYS)
