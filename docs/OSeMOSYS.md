@@ -517,7 +517,7 @@ Where r = discount rate, n = number of years in future
 - **Low discount rate** (2-3%): Favors long-term investments with high upfront costs (nuclear, renewables with storage)
 - **High discount rate** (10%+): Favors low capital cost, shorter-lived technologies (gas turbines)
 
-**Sensitivity**: Discount rate is one of the most influential assumptions in energy models - always run sensitivity analyses!
+**Sensitivity**: Discount rate is one of the most influential assumptions in energy models.
 
 #### DepreciationMethod[r]
 - **Indices**: r = REGION
@@ -564,14 +564,12 @@ SalvageValue = CapitalCost × (RemainingLife / TotalLife)
 **Which to Use?**
 - **Sinking fund** (Method 1): More economically accurate, accounts for time value
 - **Straight-line** (Method 2): Simpler, more conservative
-- Default: Use Method 1 unless you have specific reasons otherwise
 
 #### DaySplit[lh, y]
 - **Indices**: lh = DAILYTIMEBRACKET, y = YEAR
 - **Purpose**: Fraction of day represented by each daily time bracket
 - **Range**: 0 to 1
 - **Constraint**: ∑(DaySplit[lh, y]) over all lh must equal 1.0
-- **Default**: 0.00137 (Python implementation - this seems like an error, should be ~1/number of brackets)
 
 #### Conversionls[l, ls], Conversionld[l, ld], Conversionlh[l, lh]
 - **Indices**: l = TIMESLICE, ls = SEASON, ld = DAYTYPE, lh = DAILYTIMEBRACKET
