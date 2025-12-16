@@ -1,22 +1,39 @@
+import itertools
 import pandas as pd
+import os
+import math
+
 from .base import ScenarioComponent
 
 class TimeComponent(ScenarioComponent):
     def __init__(self, scenario_dir):
         super().__init__(scenario_dir)
         self.years = []
-        # Store definitions to calculate derived parameters later
-        self.seasons = {} 
-        self.daytypes = {}
-        self.brackets = {}
+        # Constants for physical time validation
+        self.HOURS_PER_YEAR = 8760
+        self.HOURS_PER_DAY = 24
+        self.DAYS_PER_YEAR = 365
 
-    def process(self, **kwargs):
-        self.process_years(kwargs.get("years"))
-        self.process_time_structure(
-            kwargs.get("seasons", {"Yearly": 1}),
-            kwargs.get("daytypes", {"Day": 1}),
-            kwargs.get("brackets", {"Avg": 1})
-        )
+    def process(self, years, seasons, daytypes, brackets):
+        """
+        Executes year and time structure processing.
+        
+        :return: list of tuples [(Year, Timeslice), ...] in chronological order.
+        """
+        # 1. Process Years
+        self.process_years(years)
+        
+        # 2. Process Structure (returns ordered list of timeslice names)
+        timeslices = self.process_time_structure(seasons, daytypes, brackets)
+        
+        # 3. Generate Master List (Year -> Timeslice chronological order)
+        # We iterate Year first, then Timeslices (e.g., 2020 Jan, 2020 Feb... 2021 Jan...)
+        master_time_list = []
+        for y in self.years:
+            for ts in timeslices:
+                master_time_list.append((y, ts))
+                
+        return master_time_list
 
     def process_years(self, years_input):
         """
@@ -39,16 +56,18 @@ class TimeComponent(ScenarioComponent):
 
     def process_time_structure(self, seasons: dict, daytypes: dict, brackets: dict):
         """
-        Generates a complex time structure with specific weights and custom conversion factors.
+        Generates time structure calculating explicit duration in hours.
+        Execute the logic to generate final CSVs.
         
-        :param seasons_config: dict {Name: Fraction_of_Year} (e.g., Winter: 0.25)
-        :param daytypes_config: dict {Name: Fraction_of_Season} (e.g., PeakDay: 0.01)
-        :param brackets_config: dict {Name: Fraction_of_Day} (e.g., EveningPeak: 0.10)
+        Recommended Inputs:
+        :param seasons: dict {Name: Days} (e.g. Winter: 90) - Should sum to ~365
+        :param daytypes: dict {Name: Weight} (e.g. Weekday: 5, Weekend: 2)
+        :param brackets: dict {Name: Hours} (e.g. Day: 16, Night: 8) - Should sum to ~24
         """
         if not self.years:
             raise ValueError("Years must be defined before defining time structure.")
 
-        # 1. Normalize Inputs to ensure they sum to 1.0 (Safety check)
+        # 1. Convert everything to fractions
         s_fracs = self._normalize(seasons)
         d_fracs = self._normalize(daytypes)
         b_fracs = self._normalize(brackets)
@@ -68,38 +87,44 @@ class TimeComponent(ScenarioComponent):
         map_ld = [] # Slice -> DayType
         map_lh = [] # Slice -> Bracket
 
-        # Calculate YearSplit and DaySplit
         year_split_rows = []
         day_split_rows = []
         
+        total_calculated_hours = 0.0
+
         for s, s_val in s_fracs.items():
             for d, d_val in d_fracs.items():
                 for b, b_val in b_fracs.items():
                     ts_name = f"{s}_{d}_{b}"
                     timeslice_data.append(ts_name)
 
-                    # Create Mapping (Conversion) records
-                    # Format: (Timeslice, Parent, Value)
-                    # We write 1 for match. OSeMOSYS implies 0 otherwise (usually sparse).
+                    # Standard Mapping (Always 1.0 for Cartesian)
                     map_ls.append({"TIMESLICE": ts_name, "SEASON": s, "VALUE": 1})
                     map_ld.append({"TIMESLICE": ts_name, "DAYTYPE": d, "VALUE": 1})
                     map_lh.append({"TIMESLICE": ts_name, "DAILYTIMEBRACKET": b, "VALUE": 1})
 
-                    # Calculate YearSplit (The fraction of the year this slice represents)
-                    # Fraction = SeasonFrac * DayTypeFrac * BracketFrac
-                    total_frac = s_val * d_val * b_val
+                    # Calculations
+                    season_hours = s_val * self.HOURS_PER_YEAR
+                    daytype_hours = d_val * season_hours
+                    slice_hours = b_val * daytype_hours
                     
-                    # Apply to every modeled year
+                    
+                    total_calculated_hours += slice_hours
+
+                    # YearSplit (Fraction of Year)
+                    year_split_frac = slice_hours / self.HOURS_PER_YEAR
+                    
                     for y in self.years:
                         year_split_rows.append({
                             "TIMESLICE": ts_name,
                             "YEAR": y,
-                            "VALUE": round(total_frac, 6)
+                            "VALUE": round(year_split_frac, 9) # High precision required
                         })
 
                 # Calculate DaySplit (Fraction of Day)
-                # Note: This is usually just the bracket fraction, defined per year
+                # Should ideally correspond to Hours / 24
                 for b, b_val in b_fracs.items():
+                    # b_val is already normalized (e.g. 16/24)
                     for y in self.years:
                         day_split_rows.append({
                             "DAILYTIMEBRACKET": b,
@@ -107,7 +132,11 @@ class TimeComponent(ScenarioComponent):
                             "VALUE": round(b_val, 6)
                         })
 
-        # 4. Write Sets and Maps
+        # 4. Validation
+        if not math.isclose(total_calculated_hours, self.HOURS_PER_YEAR, abs_tol=0.1):
+            print(f"WARNING: Total calculated time is {total_calculated_hours:.4f} hours.")
+
+        # 5. Write Files
         self.write_csv("TIMESLICE.csv", timeslice_data)
         self.write_dataframe("Conversionls.csv", pd.DataFrame(map_ls))
         self.write_dataframe("Conversionld.csv", pd.DataFrame(map_ld))
@@ -115,12 +144,12 @@ class TimeComponent(ScenarioComponent):
         self.write_dataframe("YearSplit.csv", pd.DataFrame(year_split_rows))
         self.write_dataframe("DaySplit.csv", pd.DataFrame(day_split_rows).drop_duplicates())
 
-        # 5. DaysInDayType (The number of days a specific DayType occurs in a Season)
-        # Logic: 365 * Fraction_Season * Fraction_DayType
+        # 6. DaysInDayType Calculation
+        # Logic: 365 * SeasonFrac * DayTypeFrac
         didt_rows = []
         for s, s_val in s_fracs.items():
             for d, d_val in d_fracs.items():
-                days = 365.0 * s_val * d_val
+                days = self.DAYS_PER_YEAR * s_val * d_val
                 for y in self.years:
                     didt_rows.append({
                         "SEASON": s,
@@ -129,10 +158,14 @@ class TimeComponent(ScenarioComponent):
                         "VALUE": round(days, 4)
                     })
         self.write_dataframe("DaysInDayType.csv", pd.DataFrame(didt_rows))
-
+        return timeslice_data
+    
     def _normalize(self, data: dict):
+        """Normalizes inputs to sum to 1.0."""
         total = sum(data.values())
-        return {k: v / total for k, v in data.items()} if total > 0 else data
+        if total == 0:
+            return {k: 0 for k in data}
+        return {k: v / total for k, v in data.items()}
     
     def visualize_timeslices(self):
         """
@@ -140,7 +173,8 @@ class TimeComponent(ScenarioComponent):
         Features:
         - Broken Bar Chart logic
         - Colorblind-friendly palette + Textures
-        - Annotations for duration (Days) and Intensity (Stress)
+        - Annotations for duration (Days)
+        - Title calculation of total hours
         """
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
@@ -287,7 +321,6 @@ class TimeComponent(ScenarioComponent):
         ax.set_xlim(0, 1)
         ax.set_ylim(-0.6, len(seasons) - 0.4)
         
-        # Italic, Larger Axis Label
         ax.set_xlabel("Proportion of Season Time", fontsize=16, fontstyle='italic', labelpad=15)
         
         ax.spines['top'].set_visible(False)
@@ -295,7 +328,6 @@ class TimeComponent(ScenarioComponent):
         ax.spines['left'].set_visible(False)
         ax.tick_params(axis='y', length=0)
         
-        # Larger Legend
         legend_handles = [patches.Patch(facecolor=dt_style_map[dt]['color'], 
                           hatch=dt_style_map[dt]['hatch'], label=dt, edgecolor='black') 
                           for dt in sorted_daytypes]
@@ -303,6 +335,15 @@ class TimeComponent(ScenarioComponent):
         ax.legend(handles=legend_handles, title="Day Types", loc='upper center', 
                   bbox_to_anchor=(0.5, -0.15), ncol=len(daytypes), frameon=False,
                   fontsize=14, title_fontsize=16)
+
+        # Sum of YearSplit values * 8760
+        total_fraction = ys['VALUE'].sum()
+        total_hours = total_fraction * 8760
+
+        ax.set_title(
+            f"Scenario Time Structure\nTotal Duration: {total_hours:,.1f} Hours", 
+            fontsize=18, pad=20
+        )
 
         plt.tight_layout()
         plt.show()

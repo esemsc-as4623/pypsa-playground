@@ -1,19 +1,14 @@
-"""
-pyoscomp/translation/base.py
-
-Base classes for input/output translation layers for PyPSA and OSeMOSYS.
-"""
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Union
 import pandas as pd
 
 class InputTranslator(ABC):
     """
     Abstract base class for translating generic scenario input data to model-specific formats.
     """
-    def __init__(self, input_data: Dict[str, pd.DataFrame], config: Dict[str, Any]):
+    def __init__(self, input_data: Dict[str, pd.DataFrame], config: Dict[str, Any] = None):
         self.input_data = input_data
-        self.config = config
+        self.config = config or {}
 
     @abstractmethod
     def translate(self) -> Any:

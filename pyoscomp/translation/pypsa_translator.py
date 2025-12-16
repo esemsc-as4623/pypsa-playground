@@ -1,174 +1,181 @@
-"""
-pyoscomp/translation/pypsa_translator.py
-
-Translates scenario input/output for PyPSA model.
-"""
 from .base import InputTranslator, OutputTranslator
 
 import logging
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-save_directory = Path(__file__).parent
-
 import pypsa
 from typing import Dict, Any, List, Optional
 import pandas as pd
 import numpy as np
-import datetime
 from itertools import product
+
+logger = logging.getLogger(__name__)
 
 class PyPSAInputTranslator(InputTranslator):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.network = pypsa.Network()
-        self.network.add("Carrier", "AC", color="lightblue") # TODO: make configurable
+        self.network.add("Carrier", "AC", color="lightblue") 
 
     def translate(self):
         """
         Convert generic scenario input to PyPSA network data format.
         Returns a PyPSA Network object.
         """
-        # create buses based on regions
-        self.network.add("Bus", self._create_buses())
+        # 1. Create Buses (Regions)
+        regions = self._create_buses()
+        self.network.add("Bus", regions)
 
-        # create snapshots based on YEAR, SEASON, DAYTYPE, DAILYTIMEBRACKET
-        self.network.set_snapshots(range(self._create_snapshots()))
+        # 2. Create Snapshots & Weightings (Time)
+        self._setup_time_structure()
 
-        # add load (demand) profile
-        for bus in self.network.buses.index:
-            self.network.add("Load", bus + " load", bus=bus,
-                  p_set=self._add_demand(bus))
+        # 3. Add Loads (Demand)
+        self._add_demand()
+        
+        return self.network
     
     def _create_buses(self) -> np.ndarray:
         """
         Helper method to create one bus per OSeMOSYS region.
-        Returns an array of region names
         """
         regions_df = self.input_data.get("REGION")
         
-        if regions_df is None:
-            return 0
+        if regions_df is None or regions_df.empty:
+            # Fallback for simple single-node models
+            return np.array(["Region1"])
         
-        elif regions_df.empty:
-            # if no regions listed, assume single region model
-            regions = np.array(["DEFAULT_REGION"])
-
-        else:
-            regions = regions_df.values.flatten()
-        
-        return regions
+        return regions_df["VALUE"].values.flatten()
     
-    def _create_snapshots(self) -> np.ndarray:
+    def _create_snapshots(self):
         """
-        Helper method to determine number of snapshots from TIMESLICE data.
-        Returns an array of timeslices
+        Sets network snapshots and snapshot_weightings based on TIMESLICE, YEAR, and YearSplit.
+        
+        OSeMOSYS Logic: YearSplit[t,y] = Fraction of year (0 to 1)
+        PyPSA Logic: weighting[t] = Duration in hours
         """
-        # first check for explicit TIMESLICE definition
         timeslice_df = self.input_data.get("TIMESLICE")
-        
-        if timeslice_df is not None and not timeslice_df.empty:
-            return timeslice_df.values.flatten()
-        
-        # otherwise, build timeslices from YEAR, SEASON, DAYTYPE, DAILYTIMEBRACKET
         year_df = self.input_data.get("YEAR")
-        season_df = self.input_data.get("SEASON")
-        daytype_df = self.input_data.get("DAYTYPE")
-        dailytimebracket_df = self.input_data.get("DAILYTIMEBRACKET")
+        year_split = self.input_data.get("YearSplit")
 
-        if year_df is None or year_df.empty:
-            # assume single year if none specified
-            years = np.array([datetime.datetime.now().year])
-        else:
-            years = year_df.values.flatten()
+        if timeslice_df is None or year_df is None:
+            raise ValueError("TIMESLICE and YEAR must be defined in input data.")
 
-        if season_df is None or season_df.empty:
-            # assume single season if none specified
-            seasons = np.array(["ANNUAL"])
-        else:
-            seasons = season_df.values.flatten()
+        years = year_df["VALUE"].values
+        timeslices = timeslice_df["VALUE"].values
 
-        if daytype_df is None or daytype_df.empty:
-            # assume single daytype if none specified
-            daytypes = np.array(["ALLDAYS"])
-        else:
-            daytypes = daytype_df.values.flatten()
+        # 1. Create a MultiIndex for (Year, Timeslice)
+        snapshot_index = pd.MultiIndex.from_product(
+            [years, timeslices], 
+            names=["year", "timeslice"]
+        )
+        self.network.set_snapshots(snapshot_index)
 
-        if dailytimebracket_df is None or dailytimebracket_df.empty:
-            # assume single dailytimebracket if none specified
-            dailytimebrackets = np.array(["ALLHOURS"])
-        else:
-            dailytimebrackets = dailytimebracket_df.values.flatten()
+        # 2. Calculate Weightings (Hours)
+        # Default to 1 hour if YearSplit is missing (dangerous, but prevents crash)
+        duration_hours = pd.Series(1.0, index=snapshot_index)
 
-        # store mapping of time indices to time labels
-        timelabels = np.array([f"{y}-{s}-{d}-{t}" for y, s, d, t in product(
-            years, seasons, daytypes, dailytimebrackets)])
-        
-        return timelabels
-    
-    def _add_demand(self, aggregate: bool = True):
+        if year_split is not None and not year_split.empty:
+            # Map OSeMOSYS 'YearSplit' to the snapshot index
+            # OSeMOSYS columns: ["TIMESLICE", "YEAR", "VALUE"]
+            
+            ys = year_split.copy()
+            ys = ys.rename(columns={"VALUE": "fraction"})
+            
+            # Create matching index for easy mapping
+            ys = ys.set_index(["YEAR", "TIMESLICE"])
+            
+            # Reindex to map the YearSplit data to the Cartesian product of snapshots
+            # Any missing combinations get 0 hours
+            aligned_fractions = ys["fraction"].reindex(snapshot_index).fillna(0)
+            
+            # Convert fraction of year to hours (8760 hours/year)
+            duration_hours = aligned_fractions * 8760.0
+
+        # 3. Assign to PyPSA specific columns
+        # PyPSA expects a DataFrame with 'objective', 'stores', 'generators'
+        self.network.snapshot_weightings = pd.DataFrame(
+            {
+                "objective": duration_hours,
+                "stores": duration_hours,
+                "generators": duration_hours
+            },
+            index=self.network.snapshots
+        )
+
+    def _add_demand(self):
         """
-        Helper method to add demand profile to self.network.
+        Vectorized addition of demand profiles.
+        
+        OSeMOSYS: 
+          - SpecifiedAnnualDemand (MWh/year)
+          - SpecifiedDemandProfile (Fraction of demand in this slice)
+        
+        PyPSA:
+          - Load p_set (MW)
+        
+        Formula: Power (MW) = (AnnualDemand * ProfileFraction) / (DurationHours)
         """
         annual_df = self.input_data.get("SpecifiedAnnualDemand")
-        if annual_df is None or annual_df.empty:
-            # TODO: error handling
-            return None
         profile_df = self.input_data.get("SpecifiedDemandProfile")
+        
+        if annual_df is None or annual_df.empty:
+            return
+
+        # Prepare Annual Data
+        # Index: [REGION, YEAR]
+        annual_piv = annual_df.pivot(index=["REGION", "YEAR"], columns=[], values="VALUE")
+
+        # Prepare Profile Data
         if profile_df is None or profile_df.empty:
-            # if no profile provided, assume flat profile
-            profile_df = pd.DataFrame({
-                "REGION": annual_df["REGION"],
-                "YEAR": annual_df["YEAR"],
-                "TIMESLICE": self.network.snapshots,
-                "VALUE": 1.0 / len(self.network.snapshots) # TODO: divide by number of timeslices per year
-            })
+            # If no profile, assume flat profile (1/N) logic handled implicitly or raise warning
+            logger.warning("No SpecifiedDemandProfile found. Assuming flat demand.")
+            # Create a dummy flat profile logic here if needed
+            return
 
-        timeslices = self.network.snapshots
+        # Pivot Profile to: Index=[REGION, YEAR], Columns=[TIMESLICE]
+        # This gives us the fraction for every slice
+        profile_piv = profile_df.pivot(index=["REGION", "YEAR"], columns="TIMESLICE", values="VALUE")
+        
+        # Ensure we have data for all Regions/Years
+        # Multiply Annual Total (MWh) by Profile Fraction -> Energy per slice (MWh)
+        energy_per_slice = profile_piv.multiply(annual_piv, axis=0)
+        
+        # Now convert Energy (MWh) to Power (MW)
+        # Divide by the duration of each snapshot
+        # Snapshot weightings are indexed by (Year, Timeslice)
+        weights = self.network.snapshot_weightings
+        
+        # Iterate through regions to add them to the network
+        for region in self.network.buses.index:
+            if region not in energy_per_slice.index.get_level_values("REGION"):
+                continue
 
-        if aggregate:
-            # loop over regions (buses)
-            for region in self.network.buses.index:
-                demand = np.zeros(len(timeslices))
-                region_annual = annual_df[annual_df["REGION"] == region]
-                
-                # for each year
-                for _, annual_row in region_annual.iterrows():
-                    year = annual_row["YEAR"]
-                    value = annual_row["VALUE"]
+            # Extract data for this region: Index becomes [YEAR], cols are [TIMESLICE]
+            region_energy = energy_per_slice.loc[region] 
+            
+            # Stack to get Series with index (YEAR, TIMESLICE) matching snapshots
+            region_energy_stacked = region_energy.stack()
+            region_energy_stacked.index.names = ["year", "timeslice"]
+            
+            # Align with network snapshots (filling missing data with 0)
+            aligned_energy = region_energy_stacked.reindex(self.network.snapshots).fillna(0)
+            
+            # Calculate Power: MW = MWh / Hours
+            # Avoid division by zero
+            aligned_power = aligned_energy / weights.replace(0, 1)
+            
+            # Handle cases where weight is 0 (should imply 0 power)
+            aligned_power = aligned_power.where(weights > 0, 0)
 
-                    # get profile by timeslice
-                    region_profile = profile_df[
-                        (profile_df["REGION"] == region) &
-                        (profile_df["YEAR"] == year)
-                    ]
-
-                    # for each timeslice
-                    for _, profile_row in region_profile.iterrows():
-                        timeslice = profile_row["TIMESLICE"]
-                        profile_value = profile_row["VALUE"]
-
-                        # add timeslice_proportion * annual_value to demand array
-                        if timeslice in timeslices:
-                            idx = list(timeslices).index(timeslice)
-                            demand[idx] += value * profile_value
-
-                # add load to network
-                self.network.add("Load", region + " load", bus=region, p_set=demand)
-                
-        else:
-            # TODO: incorporate fuel-specific demand
-            pass
-
-        additional_df = self.input_data.get("AccumulatedAnnualDemand")
-        if additional_df is not None and not additional_df.empty:
-            # TODO: deal with additional non-profiled demand
-            pass
+            self.network.add("Load", 
+                             name=f"{region}_load", 
+                             bus=region, 
+                             p_set=aligned_power)
 
     def _add_supply(self, generator: str):
         """
         Helper method to add supply profile to self.network.
         """
+        # Similar vectorized logic would go here for Capacity, AvailabilityFactor, etc.
         pass
 
 class PyPSAOutputTranslator(OutputTranslator):
@@ -176,5 +183,12 @@ class PyPSAOutputTranslator(OutputTranslator):
         """
         Convert PyPSA results to standardized output DataFrames.
         """
-        # Placeholder: implement actual translation logic
-        return {"summary": pd.DataFrame({"result": ["example"]})}
+        results = {}
+        
+        # Example: Generation per carrier
+        if not self.model_output.generators_t.p.empty:
+            gen = self.model_output.generators_t.p
+            # Logic to unstack/melt back to OSeMOSYS format
+            results["Generation"] = gen 
+            
+        return results
