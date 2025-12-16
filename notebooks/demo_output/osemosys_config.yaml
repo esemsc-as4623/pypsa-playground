@@ -1,0 +1,22 @@
+
+REGION:
+  type: set
+YEAR:
+  type: set
+SEASON:
+  type: set
+DAYTYPE:
+  type: set
+DAILYTIMEBRACKET:
+  type: set
+TIMESLICE:
+  type: set
+YearSplit:
+  type: param
+  columns: ["TIMESLICE", "YEAR", "VALUE"]
+DaySplit:
+  type: param
+  columns: ["DAILYTIMEBRACKET", "YEAR", "VALUE"]
+DaysInDayType:
+  type: param
+  columns: ["SEASON", "DAYTYPE", "YEAR", "VALUE"]

@@ -1,0 +1,17 @@
+TIMESLICE,DAYTYPE,VALUE
+S1_WD_Day,WD,1
+S1_WD_Night,WD,1
+S1_WE_Day,WE,1
+S1_WE_Night,WE,1
+S2_WD_Day,WD,1
+S2_WD_Night,WD,1
+S2_WE_Day,WE,1
+S2_WE_Night,WE,1
+S3_WD_Day,WD,1
+S3_WD_Night,WD,1
+S3_WE_Day,WE,1
+S3_WE_Night,WE,1
+S4_WD_Day,WD,1
+S4_WD_Night,WD,1
+S4_WE_Day,WE,1
+S4_WE_Night,WE,1
