@@ -1,3 +1,11 @@
+# pyoscomp/scenario/components/demand.py
+
+"""
+Demand Component for scnario building in PyPSA-OSeMOSYS Comparison Framework.
+Note: this component handles the definition of energy demand / load profiles in the model.
+Demand is represented by AccumulatedAnnualDemand, SpecifiedAnnualDemand, and SpecifiedDemandProfile in OSeMOSYS terminology.
+Demand is represented by Load and Generation (when sign is -1) in PyPSA terminology.
+"""
 import pandas as pd
 import numpy as np
 import os
@@ -24,6 +32,13 @@ class DemandComponent(ScenarioComponent):
                           trend_function=None, interpolation: str='step'):
         """
         Define annual demand volume with validation and extrapolation.
+
+        :param region: str, Region Name
+        :param fuel: str, Fuel Name
+        :param model_years: list of int, Model Years to cover
+        :param trajectory: dict {year: value}, Known demand points
+        :param trend_function: function(year) -> value, Optional function for demand values
+        :param interpolation: str, 'step', 'linear', or 'cagr' for interpolation method (default 'step'); also used to extrapolate beyond known points if needed to cover all Model Years.
         """
         self.defined_fuels.add((region, fuel))
 
@@ -107,7 +122,7 @@ class DemandComponent(ScenarioComponent):
 
                 for y, val in zip(remaining_years, extrap_values):
                     # Validate Extrapolation didn't go negative
-                    if val < 0: val = 0 
+                    if val < 0: val = 0
                     self.annual_demand_data.append({
                         "REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": round(val, 4)
                     })
@@ -164,6 +179,9 @@ class DemandComponent(ScenarioComponent):
         """
         Iterates through defined fuels and calculates profile rows.
         Returns a list of dictionaries.
+
+        :param year_split_df: DataFrame, Loaded YearSplit.csv
+        :param model_years: list of int, Model Years to cover
         """
         all_profile_rows = []
 
@@ -336,11 +354,26 @@ class DemandComponent(ScenarioComponent):
             self.write_dataframe("AccumulatedAnnualDemand.csv", 
                                  pd.DataFrame(columns=["REGION", "FUEL", "YEAR", "VALUE"]))
 
-    def visualize_demand(self, region, fuel):
+    def visualize(self, region, fuel):
+        """
+        Creates a visualization of the demand composition by timeslice for a given region and fuel.
+        """
         import matplotlib.pyplot as plt
-        import numpy as np
+
+        # --- Styles ---
+        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00']
+        HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
+        ALPHAS = [1.0, 0.55, 0.85, 0.4]
+        plt.rcParams.update({
+            'font.size': 14, 
+            'text.color': 'black',
+            'axes.labelcolor': 'black',
+            'xtick.color': 'black',
+            'ytick.color': 'black',
+            'font.family': 'sans-serif'
+        })
         
-        # --- 1. DATA PREPARATION ---
+        # --- Load Data ---
         if (region, fuel) not in self.defined_fuels:
             print(f"Error: No demand defined for {region} - {fuel}")
             return
@@ -348,99 +381,99 @@ class DemandComponent(ScenarioComponent):
         df_annual = pd.DataFrame(self.annual_demand_data)
         if df_annual.empty: return
         df_annual = df_annual[(df_annual['REGION'] == region) & (df_annual['FUEL'] == fuel)]
+        years = sorted(df_annual['YEAR'].unique())
         
         try:
-            ys_path = os.path.join(self.scenario_dir, "YearSplit.csv")
-            year_split_df = pd.read_csv(ys_path)
-            
-            original_defined = self.defined_fuels
-            self.defined_fuels = {(region, fuel)}
-            
-            years = sorted(df_annual['YEAR'].unique())
-            profile_rows = self._generate_all_profiles(year_split_df, years)
-            
-            self.defined_fuels = original_defined
-            df_profile = pd.DataFrame(profile_rows)
-            
-        except Exception as e:
-            print(f"Visualization error: {e}")
-            return
+            ys = pd.read_csv(os.path.join(self.scenario_dir, "YearSplit.csv"))
+                
+            try:
+                # Filter profiles to only the selected region and fuel
+                original_defined = self.defined_fuels
+                self.defined_fuels = {(region, fuel)}
+                profile_rows = self._generate_all_profiles(ys, years)
+                df_profile = pd.DataFrame(profile_rows)
 
+                # Restore global defined fuels
+                self.defined_fuels = original_defined
+            except:
+                print(f"Error: Could not generate profiles for {region} - {fuel}.")
+                return
+
+            cls = pd.read_csv(os.path.join(self.scenario_dir, "Conversionls.csv"))
+            cld = pd.read_csv(os.path.join(self.scenario_dir, "Conversionld.csv"))
+            clh = pd.read_csv(os.path.join(self.scenario_dir, "Conversionlh.csv"))
+
+            slice_map = {}
+            for _, row in cls.iterrows():
+                slice_map.setdefault(row['TIMESLICE'], {})['Season'] = row['SEASON']
+            for _, row in cld.iterrows():
+                slice_map.setdefault(row['TIMESLICE'], {})['DayType'] = row['DAYTYPE']
+            for _, row in clh.iterrows():
+                slice_map.setdefault(row['TIMESLICE'], {})['DailyTimeBracket'] = row['DAILYTIMEBRACKET']
+
+        except FileNotFoundError:
+            print("Error: Required CSVs not found.")
+
+        # --- Process Data ---
         merged = pd.merge(df_annual, df_profile, on='YEAR')
-        merged['ABS_VALUE'] = merged['VALUE_x'] * merged['VALUE_y'] 
+        merged['ABS_VALUE'] = merged['VALUE_x'] * merged['VALUE_y']
         
-        # Pivot & Sort
         plot_data = merged.pivot(index='YEAR', columns='TIMESLICE', values='ABS_VALUE')
         plot_data = plot_data.reindex(sorted(plot_data.columns), axis=1)
-
-        # --- 2. STYLING SETUP ---
-        # Wong Palette (Colorblind friendly)
-        CB_PALETTE = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7']
-        # Textures for DayTypes
-        HATCHES = ['', '///', '..', 'xxx', '++', 'OO']
-        # Alphas for Brackets (1.0 = Solid, 0.5 = Faded)
-        # We cycle logic: Bright, Dim, Bright, Dim...
-        ALPHAS = [1.0, 0.55, 0.85, 0.4]
-
-        timeslices = plot_data.columns
-        unique_seasons = []
-        unique_daytypes = []
-        unique_brackets = []
         
-        ts_meta = {} 
+        data = []
+        seasons = set()
+        daytypes = set()
+        timebrackets = set()
+
+        for ts in plot_data.columns:
+            meta = slice_map.get(ts, {})
+            season = meta.get('Season', 'Unknown')
+            daytype = meta.get('DayType', 'Unknown')
+            timebracket = meta.get('DailyTimeBracket', 'Unknown')
+            
+            seasons.add(season)
+            daytypes.add(daytype)
+            timebrackets.add(timebracket)
+            
+            data.append({"ts": ts, "season": season, "daytype": daytype, "timebracket": timebracket})
         
-        for ts in timeslices:
-            parts = ts.split('_')
-            s = parts[0] if len(parts) > 0 else "Unknown"
-            d = parts[1] if len(parts) > 1 else "Unknown"
-            b = parts[2] if len(parts) > 2 else "Unknown"
-            
-            if s not in unique_seasons: unique_seasons.append(s)
-            if d not in unique_daytypes: unique_daytypes.append(d)
-            if b not in unique_brackets: unique_brackets.append(b)
-            
-            ts_meta[ts] = {'season': s, 'daytype': d, 'bracket': b}
+        dt_style_map = {d: CB_PALETTE[i % len(CB_PALETTE)] for i, d in enumerate(sorted(list(daytypes)))}
+        tb_style_map = {b: HATCHES[i % len(HATCHES)] for i, b in enumerate(sorted(list(timebrackets)))}
 
-        # Create Mappers
-        season_color_map = {s: CB_PALETTE[i % len(CB_PALETTE)] for i, s in enumerate(unique_seasons)}
-        daytype_hatch_map = {d: HATCHES[i % len(HATCHES)] for i, d in enumerate(unique_daytypes)}
-        bracket_alpha_map = {b: ALPHAS[i % len(ALPHAS)] for i, b in enumerate(unique_brackets)}
-
-        # --- 3. PLOTTING ---
+        # --- Plotting ---
         fig, ax = plt.subplots(figsize=(12, 7))
-        
         bottoms = np.zeros(len(plot_data))
         years_x = plot_data.index.astype(str)
 
-        for ts in timeslices:
-            values = plot_data[ts].fillna(0).values
-            meta = ts_meta[ts]
-            
-            color = season_color_map[meta['season']]
-            hatch = daytype_hatch_map[meta['daytype']]
-            alpha = bracket_alpha_map[meta['bracket']]
-            
-            # Plot bar segment
-            # Note: We set the edge alpha to 1.0 (opaque) so the border remains crisp 
-            # even if the fill is faded (alpha)
+        legend_handles = {}
+        for d in data:
+            values = plot_data[d["ts"]].fillna(0).values
+            color = dt_style_map[d['daytype']]
+            hatch = tb_style_map[d['timebracket']]
+            legend_key = f"{d['daytype']} | {d['timebracket']}"
+            # Only add a handle for each (daytype, timebracket) combo once
             bar = ax.bar(
                 years_x, values, bottom=bottoms, 
-                label=ts, color=color, hatch=hatch, alpha=alpha,
-                edgecolor=(0,0,0,1), linewidth=0.5
+                label=None, color=color, hatch=hatch,
+                edgecolor='white', linewidth=0.5
             )
-            
+            if legend_key not in legend_handles:
+                legend_handles[legend_key] = bar[0]
             bottoms += values
 
-        # --- 4. FORMATTING ---
+        # --- Formatting ---
         ax.set_ylabel("Energy Demand (Model Units)")
         ax.set_xlabel("Year")
         ax.set_title(f"Demand Composition: {region} - {fuel}")
-        
-        # Legend
-        if len(timeslices) > 10:
-            ax.legend(title="Timeslice", bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        # Custom legend: only show daytype and timebracket
+        handles = list(legend_handles.values())
+        labels = list(legend_handles.keys())
+        if len(handles) > 10:
+            ax.legend(handles, labels, title="Daytype | Timebracket", bbox_to_anchor=(1.05, 1), loc='upper left')
         else:
-            ax.legend(title="Timeslice", loc='best')
+            ax.legend(handles, labels, title="Daytype | Timebracket", loc='best')
 
         plt.grid(axis='y', linestyle='--', alpha=0.3)
         plt.tight_layout()

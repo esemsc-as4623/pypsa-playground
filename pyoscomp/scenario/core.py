@@ -13,11 +13,16 @@ class Scenario:
         self.topology = TopologyComponent(scenario_dir)
         self.time = TimeComponent(scenario_dir)
         self.demand = DemandComponent(scenario_dir)
+        # self.supply = SupplyComponent(scenario_dir)  # Future component
+        # self.performance = PerformanceComponent(scenario_dir)  # Future component
+        # self.economics = EconomicsComponent(scenario_dir)  # Future component
+        # self.storage = StorageComponent(scenario_dir)  # Future component
 
         # State tracking 
         self.node_list = []
         self.year_list = []
         self.time_list = []
+        self.time_hours = []
 
     def set_topology_structure(self, nodes):
         """
@@ -44,14 +49,16 @@ class Scenario:
         if not daytypes: daytypes = {"Day": 1}
         if not brackets: brackets = {"Avg": 1}
 
-        # process() returns the master list of (Year, Timeslice) tuples
-        self.time_list = self.time.process(years, seasons, daytypes, brackets)
+        # process() returns
+        # time_list: master list of (Year, Timeslice) tuples representing the time structure
+        # time_hours: number of hours represented by each entry in time_list
+        self.time_list, self.time_hours = self.time.process(years, seasons, daytypes, brackets)
         
-        # Update local year list cache for convenience
+        # Update local year list cache
         self.year_list = self.time.years
 
-    def set_interyear_demand(self, region, fuel, 
-                              trajectory, trend_function=None, interpolation: str=None):
+    def set_interyear_demand(self, region, fuel, trajectory,
+                             trend_function=None, interpolation: str='step'):
         """
         Primary entry point for adding annual demand.
         
@@ -73,7 +80,7 @@ class Scenario:
         :param fuel: Name of the fuel (e.g., 'ELEC')
         :param weights_*: dicts for weighting profiles (e.g. {'Winter': 2})
         
-        ordered by seasons, daytypes, brackets, timeslices
+        ordered in granularity by seasons, daytypes, brackets, timeslices
         1. If weights_timeslice is provided, it overrides all other weights.
         2. If provided, weights_seasons, weights_daytypes, weights_brackets are used.
         3. Defaults to 'flat' shape if no weights provided.
@@ -94,5 +101,11 @@ class Scenario:
         """
         # Process demand (requires Time to be done first)
         self.demand.process(self.year_list)
+
+        # Future component processing calls
         # self.supply.process(self.year_list)
+        # self.performance.process(self.node_list, self.year_list, self.time_list)
+        # self.economics.process(self.node_list, self.year_list)
+        # self.storage.process(self.node_list, self.year_list, self.time_list)
+
         print(f"Scenario built successfully in: {self.scenario_dir}")

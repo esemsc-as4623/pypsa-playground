@@ -1,3 +1,11 @@
+# pyoscomp/scenario/components/topology.py
+
+"""
+Topology component for scenario building in PyPSA-OSeMOSYS Comparison Framework.
+Note: This component handles the creation of nodes for the scenario.
+Nodes are referred to as REGION in OSeMOSYS.
+Nodes are referered to as Buses in PyPSA.
+"""
 from .base import ScenarioComponent
 
 class TopologyComponent(ScenarioComponent):
@@ -11,7 +19,7 @@ class TopologyComponent(ScenarioComponent):
         node_list = []
 
         if isinstance(nodes_input, int):
-            # Create N generic nodes: Node_1, Node_2, etc.
+            # Create N generically named nodes: Node_1, Node_2, etc.
             node_list = [f"Node_{i+1}" for i in range(nodes_input)]
         elif isinstance(nodes_input, list):
             # Use provided names
