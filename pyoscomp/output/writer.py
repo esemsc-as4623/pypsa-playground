@@ -1,6 +1,6 @@
-"""
-pyoscomp/output/writer.py
+# pyoscomp/output/writer.py
 
+"""
 Handles writing standardized output data to CSV files and managing output directories.
 """
 import os

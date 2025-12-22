@@ -1,9 +1,8 @@
-"""
-pyoscomp/input/reader.py
+# pyoscomp/input/reader.py
 
-Handles reading scenario input data from CSV and config files.
 """
-
+Reads scenario input data from a specified folder containing CSV and config files.
+"""
 import os
 import glob
 import pandas as pd
