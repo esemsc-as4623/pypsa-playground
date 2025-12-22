@@ -1,12 +1,12 @@
+# pyoscomp/runners/osemosys.py
 
 """
-pyoscomp/models/osemosys_runner.py
-
-Executes the OSeMOSYS model using translated input data and otoole or direct Pyomo.
+Executes the OSeMOSYS model using translated input data. Option to use otoole or Pyomo.
+See otoole documentation: https://otoole.readthedocs.io/en/latest/
+See Pyomo GitHub implementation: https://github.com/OSeMOSYS/OSeMOSYS_Pyomo
 """
 import subprocess
 import os
-from typing import Dict, Any, Optional
 
 class OSeMOSYSRunner:
     def __init__(self, input_dir: str, working_dir: str, use_otoole: bool = True):
@@ -22,7 +22,10 @@ class OSeMOSYSRunner:
         os.makedirs(self.working_dir, exist_ok=True)
 
     def write_input_files_otoole(self) -> (str, str):
-        """Use otoole to convert CSVs to datafile and config."""
+        """
+        Use otoole to convert CSVs to datafile and config.
+        Returns paths to datafile and configfile.
+        """
         datafile = os.path.join(self.working_dir, "scenario.txt")
         configfile = os.path.join(self.input_dir, "osemosys_config.yaml")
         cmd = [
@@ -34,7 +37,8 @@ class OSeMOSYSRunner:
 
     def run(self) -> str:
         """
-        Run OSeMOSYS using otoole+glpsol or direct Pyomo+glpsol. Returns path to results directory.
+        Run OSeMOSYS using otoole+glpsol or direct Pyomo+glpsol.
+        Returns path to results directory.
         """
         if self.use_otoole:
             datafile, configfile = self.write_input_files_otoole()

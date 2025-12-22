@@ -1,12 +1,11 @@
-"""
-pyoscomp/models/pypsa_runner.py
+# pyoscomp/runners/pypsa.py
 
+"""
 Executes the PyPSA model using translated input data.
 """
 import pypsa
 import pandas as pd
 import os
-from typing import Dict, Any, Optional
 
 class PyPSARunner:
     def __init__(self, input_dir: str):
