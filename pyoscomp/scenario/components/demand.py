@@ -354,7 +354,7 @@ class DemandComponent(ScenarioComponent):
             self.write_dataframe("AccumulatedAnnualDemand.csv", 
                                  pd.DataFrame(columns=["REGION", "FUEL", "YEAR", "VALUE"]))
 
-    def visualize(self, region, fuel):
+    def visualize(self, region, fuel, legend=True, ax=None):
         """
         Creates a visualization of the demand composition by timeslice for a given region and fuel.
         """
@@ -363,7 +363,6 @@ class DemandComponent(ScenarioComponent):
         # --- Styles ---
         CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00']
         HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
-        ALPHAS = [1.0, 0.55, 0.85, 0.4]
         plt.rcParams.update({
             'font.size': 14, 
             'text.color': 'black',
@@ -442,7 +441,8 @@ class DemandComponent(ScenarioComponent):
         tb_style_map = {b: HATCHES[i % len(HATCHES)] for i, b in enumerate(sorted(list(timebrackets)))}
 
         # --- Plotting ---
-        fig, ax = plt.subplots(figsize=(12, 7))
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(12, 7))
         bottoms = np.zeros(len(plot_data))
         years_x = plot_data.index.astype(str)
 
@@ -468,13 +468,45 @@ class DemandComponent(ScenarioComponent):
         ax.set_title(f"Demand Composition: {region} - {fuel}")
 
         # Custom legend: only show daytype and timebracket
-        handles = list(legend_handles.values())
-        labels = list(legend_handles.keys())
-        if len(handles) > 10:
-            ax.legend(handles, labels, title="Daytype | Timebracket", bbox_to_anchor=(1.05, 1), loc='upper left')
-        else:
-            ax.legend(handles, labels, title="Daytype | Timebracket", loc='best')
+        if legend:
+            handles = list(legend_handles.values())
+            labels = list(legend_handles.keys())
+            if len(handles) > 10:
+                ax.legend(handles, labels, title="Daytype | Timebracket", bbox_to_anchor=(1.05, 1), loc='upper left')
+            else:
+                ax.legend(handles, labels, title="Daytype | Timebracket", loc='best')
 
         plt.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+
+    def visualize_all(self):
+        """
+        Creates visualizations for all defined (Region, Fuel) combinations.
+        """
+        import matplotlib.pyplot as plt
+
+        n = len(self.defined_fuels)
+        if n == 0:
+            print("No (region, fuel) combinations defined.")
+            return
+        
+        ncols = 2 if n > 1 else 1
+        nrows = (n + ncols - 1) // ncols
+
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(12 * ncols, 7 * nrows))
+        if n == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten()
+
+        for idx, (region, fuel) in enumerate(self.defined_fuels):
+            self.visualize(region, fuel, legend=True if idx == 0 else False, ax=axes[idx])
+            axes[idx].set_title(f"{region} - {fuel}")
+
+        # Hide any unused subplots
+        for j in range(idx + 1, len(axes)):
+            fig.delaxes(axes[j])
+
         plt.tight_layout()
         plt.show()
