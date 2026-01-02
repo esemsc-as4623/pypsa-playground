@@ -12,28 +12,20 @@
 9. [Critical Assumptions and Limitations](#critical-assumptions-and-limitations)
 10. [Running the Model](#running-the-model)
 
-## Overview
-
 OSeMOSYS is a linear programming optimization model for long-term energy system planning. It minimizes the total discounted system cost while meeting energy demands and respecting technical, environmental, and policy constraints.
 
 **Objective Function**: Minimize total discounted cost across all regions and years
 
 ## Model Architecture
 
-```mermaid
-graph TB
     subgraph "Input Data Layer"
         A[Sets: Regions, Technologies, Fuels, Years]
         B[Demand Parameters]
-        C[Technology Parameters]
-        D[Cost Parameters]
         E[Constraint Parameters]
     end
     
     subgraph "Core Model Components"
         F[Capacity Planning]
-        G[Activity Dispatch]
-        H[Energy Balance]
         I[Storage Management]
         J[Cost Accounting]
     end
@@ -44,8 +36,6 @@ graph TB
         M[Emissions Limits]
         N[Reserve Margin]
         O[RE Targets]
-    end
-    
     subgraph "Output Results"
         P[New Capacity Investments]
         Q[Technology Activity]
@@ -57,11 +47,9 @@ graph TB
     A --> F
     B --> H
     C --> F
-    C --> G
     D --> J
     E --> K
     E --> L
-    
     F --> G
     G --> H
     F --> I
@@ -70,7 +58,6 @@ graph TB
     H --> J
     F --> J
     
-    K --> F
     L --> G
     M --> G
     N --> F
@@ -78,8 +65,6 @@ graph TB
     
     F --> P
     G --> Q
-    H --> R
-    J --> S
     G --> T
 ```
 
@@ -88,63 +73,32 @@ graph TB
 Sets define the dimensions over which the model operates. All parameters and variables are indexed by combinations of these sets.
 
 ### Comprehensive Set Examples
-
 #### YEAR
 Model planning horizon. Years don't need to be consecutive but should span your planning period.
 ```
 YEAR = {2020, 2025, 2030, 2035, 2040, 2045, 2050}
 ```
-- **Typical range**: 20-30 years
 - **Time steps**: Usually 5-year intervals (can be annual for short-term studies)
 - **Note**: First year is the base year with existing infrastructure
 
 #### TECHNOLOGY
-All energy conversion, generation, transmission, and demand technologies.
 
 **Example comprehensive set**:
 ```
-TECHNOLOGY = {
-    # Electricity Generation
-    COAL_SUB,        # Subcritical coal plant
-    COAL_SC,         # Supercritical coal plant  
     COAL_IGCC,       # Integrated gasification combined cycle
     GAS_OCGT,        # Open cycle gas turbine (peaking)
-    GAS_CCGT,        # Combined cycle gas turbine (baseload/mid)
-    OIL_ST,          # Oil steam turbine
-    NUCLEAR_GEN3,    # Generation 3 nuclear
-    NUCLEAR_GEN4,    # Generation 4 nuclear (future)
-    SOLAR_PV_UTIL,   # Utility-scale solar PV
     SOLAR_PV_ROOF,   # Rooftop solar PV
-    SOLAR_CSP,       # Concentrated solar power
     WIND_ON,         # Onshore wind
     WIND_OFF,        # Offshore wind
     HYDRO_LARGE,     # Large hydro (dam)
-    HYDRO_ROR,       # Run-of-river hydro
-    HYDRO_PS,        # Pumped storage hydro
-    BIOMASS_ST,      # Biomass steam turbine
-    GEOTHERMAL,      # Geothermal power
-    WAVE,            # Wave power
-    TIDAL,           # Tidal power
-    
-    # Transmission & Distribution
-    TRANS_HVAC,      # High voltage AC transmission
-    TRANS_HVDC,      # High voltage DC transmission
     DIST_URBAN,      # Urban distribution network
-    DIST_RURAL,      # Rural distribution network
     
     # Fossil Fuel Supply
     COAL_MINE_DOM,   # Domestic coal mining
-    COAL_IMP,        # Coal import terminal
-    GAS_PROD_CONV,   # Conventional gas production
-    GAS_PROD_SHALE,  # Shale gas production
-    GAS_IMP_PIPE,    # Gas pipeline import
     GAS_IMP_LNG,     # LNG import terminal
-    OIL_REF,         # Oil refinery
     OIL_IMP,         # Oil import
     
     # Storage
-    BATTERY_LI,      # Lithium-ion battery
-    BATTERY_FLOW,    # Flow battery
     H2_STOR_UNDER,   # Underground hydrogen storage
     H2_STOR_TANK,    # Hydrogen tank storage
     
@@ -668,7 +622,6 @@ ProductionAnnual[r, f, y] ≥
 - **Indices**: r = REGION, t = TECHNOLOGY
 - **Purpose**: Converts capacity units to activity units
 - **Units**: Activity per capacity per year (e.g., PJ/year per GW)
-- **Common value**: 31.536 (converts GW to PJ/year: 1 GW × 8760 hours × 3.6 = 31.536 PJ)
 
 #### CapacityFactor[r, t, l, y]
 - **Indices**: r = REGION, t = TECHNOLOGY, l = TIMESLICE, y = YEAR
@@ -1460,6 +1413,119 @@ Both versions produce CSV files with results:
 - Setting both TotalAnnualMax and TotalAnnualMin to conflicting values
 - Not accounting for conversion losses (InputActivityRatio > OutputActivityRatio)
 - Inconsistent timeslice definitions between parameters
+
+---
+
+## Parameters and Features Not Implemented in pyoscomp
+
+This section documents OSeMOSYS parameters and features that are **outside the current pyoscomp scope**. These exclusions reflect deliberate design decisions based on project objectives (PyPSA↔OSeMOSYS translation for long-term capacity expansion planning) rather than technical limitations.
+
+### Reserve Margin Constraints
+
+**Parameters Excluded**:
+- `ReserveMargin[r, y]` - Required reserve margin as fraction of demand
+- `ReserveMarginTagTechnology[r, t, y]` - Binary indicator for dispatchable technologies
+- `ReserveMarginTagFuel[r, f, y]` - Binary indicator for fuels requiring reserves
+
+**Rationale**: Reserve margin constraints are **advanced reliability features** focused on ensuring adequate firm capacity to meet peak demand plus planning reserve. While critical for operational planning and resource adequacy studies, these constraints are not in Phase 1 scope. PyPSA's capacity expansion includes implicit adequacy through demand satisfaction constraints, but explicit reserve margin requirements (e.g., "maintain 15% reserve above peak") are not directly translated.
+
+**Future Consideration**: Reserve margin translation could be added in Phase 2+ enhancement if use cases require explicit capacity adequacy constraints beyond energy balance requirements.
+
+### Renewable Energy Target Constraints
+
+**Parameters Excluded**:
+- `REMinProductionTarget[r, y]` - Minimum fraction of target fuel from renewable sources
+- `RETagTechnology[r, t, y]` - Binary indicator for renewable technologies
+- `RETagFuel[r, f, y]` - Binary indicator for fuels subject to RE targets
+
+**Rationale**: RE target constraints enforce **policy mandates** such as "30% of electricity from renewables by 2030". While valuable for policy scenario analysis, these are **policy-specific constraints** not inherent to physical energy system modeling. PyPSA scenarios can incorporate RE targets through cost assumptions, capacity limits, or post-processing validation, but explicit RE percentage constraints are not core to translation framework.
+
+**Future Consideration**: Could be implemented as optional constraint module if policy scenario modeling becomes primary use case.
+
+### Emissions Tracking and Limits
+
+**Parameters Excluded**:
+- `EMISSION` set - Pollutants and greenhouse gases
+- `EmissionActivityRatio[r, t, e, m, y]` - Emissions per unit of activity
+- `EmissionsPenalty[r, e, y]` - Carbon price or emission penalty
+- `AnnualEmissionLimit[r, e, y]` - Maximum annual emissions
+- `ModelPeriodEmissionLimit[r, e]` - Cumulative emissions budget
+- `AnnualExogenousEmission[r, e, y]` - Emissions from outside model
+- `ModelPeriodExogenousEmission[r, e]` - Cumulative exogenous emissions
+
+**Rationale**: Emissions tracking represents **environmental modeling layer** requiring emission factor data, carbon pricing assumptions, and policy constraint definitions. While OSeMOSYS has robust emissions accounting, pyoscomp Phase 1 focuses on **energy balance and capacity optimization fundamentals**. PyPSA includes carrier-level emissions (e.g., `carrier.co2_emissions`), but comprehensive multi-pollutant tracking (CO2, NOx, SO2, PM) with annual/cumulative limits is planned for **Phase 2 enhancement**.
+
+**Implementation Path**: Emissions parameters are well-defined in OSeMOSYS and PyPSA, making future implementation straightforward. Requires:
+1. Emission factor mapping from PyPSA carriers to OSeMOSYS EmissionActivityRatio
+2. Carbon price translation from PyPSA GlobalConstraint to EmissionsPenalty
+3. Emission limit translation from PyPSA constraints to Annual/ModelPeriodEmissionLimit
+
+### Advanced Capacity Constraints
+
+**Parameters Excluded** (beyond basic investment limits):
+- `TotalAnnualMaxCapacity[r, t, y]` - Absolute capacity ceiling (partially implemented)
+- `TotalAnnualMinCapacity[r, t, y]` - Minimum capacity mandates (partially implemented)
+- `TotalAnnualMaxCapacityInvestment[r, t, y]` - Annual deployment rate limits
+- `TotalAnnualMinCapacityInvestment[r, t, y]` - Minimum annual deployment
+- `CapacityOfOneTechnologyUnit[r, t, y]` - Lumpy investment constraints (integer units)
+
+**Rationale**: Advanced capacity constraints enable modeling of:
+- **Deployment rate limits**: Reflect supply chain, permitting, or construction capacity constraints
+- **Minimum deployment mandates**: Policy-driven technology adoption requirements
+- **Lumpy investments**: Nuclear plants, large hydro (must build in discrete units)
+
+These features add **model complexity** and may require mixed-integer programming (MIP) solvers. Phase 1 focuses on **continuous capacity optimization** with basic bounds. Advanced constraints require careful translation of PyPSA's extendable capacity logic to OSeMOSYS's more granular investment control parameters.
+
+**Future Consideration**: Deployment rate limits are valuable for realistic transition pathway modeling. Could be added as optional constraint module with user-specified limits.
+
+### Storage-Specific Advanced Features
+
+**Parameters Partially Excluded**:
+- `StorageLevelYearStart[r, s, y]` - Year-start storage level (instead of initial)
+- `StorageLevelSeasonStart[r, s, ls, y]` - Season-start storage level
+- `StorageLevelDayTypeStart[r, s, ls, ld, y]` - Day-start storage level
+
+**Rationale**: OSeMOSYS supports **hierarchical storage level constraints** at year/season/daytype boundaries, enabling seasonal storage modeling (e.g., "reservoir must be 50% full at start of dry season"). Phase 1 implements basic storage with `StorageLevelStart` (model start only). Hierarchical constraints require deeper timeslice logic integration and use case validation.
+
+**Implementation Path**: Extension requires mapping PyPSA Store `e_cyclic` and `e_initial` to OSeMOSYS hierarchical level constraints, plus user specification of season/daytype boundary requirements.
+
+### Mode-Specific Advanced Features
+
+**Parameters Excluded**:
+- Multi-mode cost variations: `VariableCost[r, t, m, y]` where costs differ significantly by mode
+- Mode-specific capacity factors: Different availability by operational mode
+
+**Rationale**: PyPSA represents multi-mode operation primarily through **multi-port Links** (sector coupling, CHP) where different port configurations imply different modes. Translation to OSeMOSYS MODE_OF_OPERATION is planned for Phase 4 Link decomposition. Phase 1-3 focuses on single-mode operation for supply technologies.
+
+**Implementation Path**: Link→MODE_OF_OPERATION decomposition (Task 4.5) will implement multi-mode logic with port-specific efficiency and cost mappings.
+
+### Trade and Network Flow
+
+**Parameters Excluded**:
+- `TradeRoute[r, rr, f, y]` - Inter-regional trade routes
+- Trade capacity limits and costs
+- Network flow constraints between regions
+
+**Rationale**: OSeMOSYS models inter-regional trade as **commodity flow between REGION entities**, abstracting away physical network topology. PyPSA models **explicit network flow** (Lines, Transformers) with Kirchhoff's laws, impedance, and voltage constraints. Translating PyPSA's network-centric model to OSeMOSYS's region-centric model requires:
+1. Bus→Region aggregation decisions
+2. Line/Transformer→TradeRoute mapping logic
+3. Network capacity→Trade capacity conversion
+
+This is **complex architectural translation** requiring user specification of regional boundaries. Phase 1 assumes **single-region models** or user-defined regional structure. Multi-region with trade is **Phase 4+ enhancement**.
+
+**Implementation Note**: If PyPSA buses map to distinct OSeMOSYS regions, Lines can translate to TradeRoute with capacity limits. However, AC/DC power flow physics are not preserved in OSeMOSYS's commodity flow formulation.
+
+### Implementation Philosophy
+
+**Minimal Viable Scope**: Phase 1 implements **energy balance fundamentals** (time, topology, demand, supply, storage, costs) enabling basic capacity expansion studies. Advanced features (reserves, emissions, RE targets, trade) are excluded to maintain focus and ensure robust core functionality.
+
+**Extensible Architecture**: Component-based design (scenario/components/) enables modular addition of excluded parameters. Each enhancement (e.g., emissions) can be implemented as isolated component without refactoring core logic.
+
+**User Guidance**: Users requiring excluded features should:
+1. **Check planning.md**: Verify if feature has documented translation approach
+2. **Manual specification**: Use OSeMOSYS parameter files directly for unsupported constraints
+3. **Post-processing**: Apply policy constraints (RE targets, emission limits) via result validation rather than model constraints
+4. **Request enhancement**: Submit feature request with use case justification if critical for workflow
 
 ---
 
