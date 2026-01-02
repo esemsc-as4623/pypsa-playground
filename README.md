@@ -37,7 +37,7 @@ pyoscomp/
 	 input/         # Input reading
 	 output/        # Output writing
 	 logs/          # Logging
-	 models/        # Model runners
+	 runners/       # Model runners
 	 translation/   # Translation layers
 	 visualization/ # Plotting
 	 tests/         # Pytest suite
@@ -45,7 +45,7 @@ pyoscomp/
 
 ## Extending the Framework
 - Add new translators in `translation/`
-- Add new model runners in `models/`
+- Add new model runners in `runners/`
 - Add new CLI commands in `cli/`
 - Document new features in Markdown
 

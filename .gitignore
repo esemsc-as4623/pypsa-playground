@@ -359,3 +359,9 @@ vite.config.ts.timestamp-*
 
 # MacOS
 .DS_Store
+
+# Agentic Project Management
+.apm/
+.github/prompts/
+package-lock.json
+package.json
