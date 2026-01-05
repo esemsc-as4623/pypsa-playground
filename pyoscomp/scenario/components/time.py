@@ -8,7 +8,7 @@ Timeslices are combinations of Seasons, DayTypes, and Daily Time Brackets.
 Temporal resolution is referred to as Snapshots in PyPSA terminology.
 Temporal resolution can be non-uniform, with different slices representing different numbers or fractions of hours.
 
-# TODO: Investment period can have a different temporal resolution than operational period, but this is not currently implemented.
+# NOTE: OSeMOSYS assumes 365 days per year.
 """
 import pandas as pd
 import math
@@ -17,37 +17,127 @@ import os
 from .base import ScenarioComponent
 
 class TimeComponent(ScenarioComponent):
+    """
+    Time component for timeslice/snapshot definitions and temporal parameters.
+    Handles OSeMOSYS time parameters: years, timeslices, seasons, daytypes, daily time brackets, and conversion tables.
+
+    Prerequisites:
+        - None
+
+    Example usage::
+        time = TimeComponent(scenario_dir)
+        # Define a custom OSeMOSYS-aligned time structure
+        years = [2020, 2025, 2030]
+        seasons = {"Winter": 90, "Summer": 90, "Shoulder": 185}  # days in each season, should sum to 365
+        daytypes = {"Weekday": 5, "Weekend": 2}  # relative weights (e.g., 5 weekdays, 2 weekend days per week)
+        brackets = {"Day": 16, "Night": 8}  # hours in each bracket, should sum to 24
+
+        time.add_time_structure(years, seasons, daytypes, brackets)
+        time.save()  # Saves all time parameter DataFrames to CSV
+
+        # To load and inspect the generated time structure later:
+        time.load()  # Loads all time parameter CSVs
+        # ... modify DataFrames as needed ...
+        time.save()  # Saves any changes
+
+    CSV Format Expectations:
+        - All CSVs must have columns as specified in each method's docstring.
+        - See OSeMOSYS.md for parameter definitions.
+    """
     def __init__(self, scenario_dir):
         super().__init__(scenario_dir)
-        self.years = []
+
+        # Operational time parameters
+        self.years_df = pd.DataFrame(columns=["YEAR"])
+        self.timeslices_df = pd.DataFrame(columns=["TIMESLICE"])
+        self.seasons_df = pd.DataFrame(columns=["SEASON"])
+        self.daytypes_df = pd.DataFrame(columns=["DAYTYPE"])
+        self.brackets_df = pd.DataFrame(columns=["DAILYTIMEBRACKET"])
+
+        self.conversionls_df = pd.DataFrame(columns=["TIMESLICE", "SEASON", "VALUE"])
+        self.conversionld_df = pd.DataFrame(columns=["TIMESLICE", "DAYTYPE", "VALUE"])
+        self.conversionlh_df = pd.DataFrame(columns=["TIMESLICE", "DAILYTIMEBRACKET", "VALUE"])
+        self.yearsplit_df = pd.DataFrame(columns=["TIMESLICE", "YEAR", "VALUE"])
+        self.daysplit_df = pd.DataFrame(columns=["DAILYTIMEBRACKET", "YEAR", "VALUE"])
+        self.daysindaytype_df = pd.DataFrame(columns=["SEASON", "DAYTYPE", "VALUE"])
+
+        # Tracking
+        self.master_time_list = []  # List of tuples (Year, Timeslice)
+        self.master_time_hours = []  # List of doubles (Hours per Timeslice)
+        self.timeslice_name_map = {}  # Dict TIMESLICE -> (Season, DayType, DailyTimeBracket)
+
         # Constants for physical time validation
         self.HOURS_PER_YEAR = 8760
         self.HOURS_PER_DAY = 24
         self.DAYS_PER_YEAR = 365
 
-    def process(self, years, seasons, daytypes, brackets):
-        """
-        Executes year and time structure processing.
-        
-        :return: list of tuples [(Year, Timeslice), ...] in chronological order.
-        """
-        # 1. Process Years
-        self.process_years(years)
-        
-        # 2. Process Structure (returns ordered list of timeslice names)
-        timeslices, slicehours = self.process_time_structure(seasons, daytypes, brackets)
-        
-        # 3. Generate Master List (Year -> Timeslice chronological order)
-        # Iterate Year first, then Timeslices (e.g., YEAR1 TS1, YEAR1 TS2... YEAR2 TS1...)
-        master_time_list = []
-        for y in self.years:
-            for ts in timeslices:
-                master_time_list.append((y, ts))
-        master_slice_hours = slicehours * len(self.years)
-                
-        return master_time_list, master_slice_hours
+        # Constant for validation
+        self.TOL = 1e-6
 
-    def process_years(self, years_input):
+    # === Load and Save Methods ===
+    def load(self):
+        """
+        Load all time parameter CSV files into DataFrames.
+        Uses read_csv from base class.
+        :raises FileNotFoundError: if any required file is missing.
+        :raises ValueError: if any file has missing or incorrect columns.
+        """
+        self.years_df = self.read_csv("YEAR.csv", ["YEAR"])
+        self.timeslices_df = self.read_csv("TIMESLICE.csv", ["TIMESLICE"])
+        self.seasons_df = self.read_csv("SEASON.csv", ["SEASON"])
+        self.daytypes_df = self.read_csv("DAYTYPE.csv", ["DAYTYPE"])
+        self.brackets_df = self.read_csv("DAILYTIMEBRACKET.csv", ["DAILYTIMEBRACKET"])
+
+        self.conversionls_df = self.read_csv("Conversionls.csv", ["TIMESLICE", "SEASON", "VALUE"])
+        self.conversionld_df = self.read_csv("Conversionld.csv", ["TIMESLICE", "DAYTYPE", "VALUE"])
+        self.conversionlh_df = self.read_csv("Conversionlh.csv", ["TIMESLICE", "DAILYTIMEBRACKET", "VALUE"])
+        self.yearsplit_df = self.read_csv("YearSplit.csv", ["TIMESLICE", "YEAR", "VALUE"])
+        self.daysplit_df = self.read_csv("DaySplit.csv", ["DAILYTIMEBRACKET", "YEAR", "VALUE"])
+        self.daysindaytype_df = self.read_csv("DaysInDayType.csv", ["SEASON", "DAYTYPE", "VALUE"])
+
+    def save(self):
+        """
+        Save all time parameter DataFrames to CSV files in the scenario directory.
+        Uses write_csv and write_dataframe from base class.
+        """
+        self.write_dataframe("YEAR.csv", self.years_df)
+        self.write_dataframe("TIMESLICE.csv", self.timeslices_df)
+        self.write_dataframe("SEASON.csv", self.seasons_df)
+        self.write_dataframe("DAYTYPE.csv", self.daytypes_df)
+        self.write_dataframe("DAILYTIMEBRACKET.csv", self.brackets_df)
+
+        self.write_dataframe("Conversionls.csv", self.conversionls_df)
+        self.write_dataframe("Conversionld.csv", self.conversionld_df)
+        self.write_dataframe("Conversionlh.csv", self.conversionlh_df)
+        self.write_dataframe("YearSplit.csv", self.yearsplit_df)
+        self.write_dataframe("DaySplit.csv", self.daysplit_df)
+        self.write_dataframe("DaysInDayType.csv", self.daysindaytype_df)
+
+    # === User Input Methods ===
+    def add_time_structure(self, years, seasons, daytypes, brackets):
+        """
+        Sets up the time structure for the scenario, updating DataFrames and class attributes, and persists outputs via save().
+
+        :param years: list[int] or tuple (start, end, step)
+        :param seasons: dict {Name: Days}
+        :param daytypes: dict {Name: Weight}
+        :param brackets: dict {Name: Hours}
+        """
+        processed_years = self._process_years(years)
+        self.years_df = pd.DataFrame({"YEAR": processed_years})
+        timeslices, slicehours = self._process_time_structure(processed_years, seasons, daytypes, brackets)
+
+        self.timeslices_df = pd.DataFrame({"TIMESLICE": timeslices})
+        self.seasons_df = pd.DataFrame({"SEASON": list(seasons.keys())})
+        self.daytypes_df = pd.DataFrame({"DAYTYPE": list(daytypes.keys())})
+        self.brackets_df = pd.DataFrame({"DAILYTIMEBRACKET": list(brackets.keys())})
+
+        # 3. Generate Master List (Year -> Timeslice chronological order)
+        self.master_time_list = [(y, ts) for y in years for ts in timeslices]
+        self.master_time_hours = slicehours * len(years)
+
+    # === Internal Logic Helpers ===
+    def _process_years(self, years_input):
         """
         Sets up the YEAR set.
         
@@ -56,49 +146,62 @@ class TimeComponent(ScenarioComponent):
             OR tuple (start, end, step) e.g. (2020, 2050, 5)
         """
         if isinstance(years_input, (list, set)):
-            self.years = sorted(list(years_input))
+            years = sorted(list(years_input))
         elif isinstance(years_input, tuple) and len(years_input) == 3:
             start, end, step = years_input
-            self.years = list(range(start, end + 1, step))
+            years = list(range(start, end + 1, step))
         else:
             raise ValueError("years_input must be a list of ints or a tuple (start, end, step).")
+        return years
 
-        self.write_csv("YEAR.csv", self.years)
-        return self.years
-
-    def process_time_structure(self, seasons: dict, daytypes: dict, brackets: dict):
+    def _process_time_structure(self, years, seasons: dict, daytypes: dict, brackets: dict):
         """
         Generates time structure calculating explicit duration in hours.
         Execute the logic to generate final CSVs.
         
         Recommended Inputs:
+        :param years: list[int] (e.g. [2020, 2025, 2030])
         :param seasons: dict {Name: Days} (e.g. Winter: 90) - Should sum to ~365
         :param daytypes: dict {Name: Weight} (e.g. Weekday: 5, Weekend: 2 | e.g. Peak: 1, OffPeak: 3)
         :param brackets: dict {Name: Hours} (e.g. Day: 16, Night: 8) - Should sum to ~24
         """
-        if not self.years:
-            raise ValueError("Years must be defined before defining time structure.")
+        # --- User input validation ---
+        # Check for empty dimensions
+        if not seasons or not daytypes or not brackets:
+            raise ValueError("Seasons, daytypes, and brackets must all be non-empty.")
+        if sum(seasons.values()) == 0 or sum(daytypes.values()) == 0 or sum(brackets.values()) == 0:
+            raise ValueError("Season, daytype, and bracket weights must all be non-zero.")
+
+        # Warn if user input is far from expected
+        if abs(sum(seasons.values()) - self.DAYS_PER_YEAR) > 1e-3:
+            print(f"WARNING: Sum of season days is {sum(seasons.values())}, expected {self.DAYS_PER_YEAR}.\n"
+                  "Season values will be normalized to sum to 1.0. This means the relative proportions are preserved, "
+                  "but the absolute mapping to calendar days may be lost. If you want physical accuracy, ensure your input sums to 365.")
+        if abs(sum(brackets.values()) - self.HOURS_PER_DAY) > 1e-3:
+            print(f"WARNING: Sum of bracket hours is {sum(brackets.values())}, expected {self.HOURS_PER_DAY}.\n"
+                  "Bracket values will be normalized to sum to 1.0. This means the relative proportions are preserved, "
+                  "but the absolute mapping to hours in a day may be lost. If you want physical accuracy, ensure your input sums to 24.")
 
         # 1. Convert everything to fractions
         s_fracs = self._normalize(seasons)
         d_fracs = self._normalize(daytypes)
         b_fracs = self._normalize(brackets)
 
-        # 2. Write Sets
-        self.write_csv("SEASON.csv", list(seasons.keys()))
-        self.write_csv("DAYTYPE.csv", list(daytypes.keys()))
-        self.write_csv("DAILYTIMEBRACKET.csv", list(brackets.keys()))
+        # 2. Update DataFrames
+        self.seasons_df = pd.DataFrame({"SEASON": list(seasons.keys())})
+        self.daytypes_df = pd.DataFrame({"DAYTYPE": list(daytypes.keys())})
+        self.brackets_df = pd.DataFrame({"DAILYTIMEBRACKET": list(brackets.keys())})
 
         # 3. Generate TIMESLICES (Cartesian Product)
         # Hierarchy: Season -> DayType -> Bracket
-        # Naming Convention: Season_DayType_Bracket
+        # Naming Convention: Season_DayType_DailyTimeBracket
         timeslice_data = []
         timeslice_hours = []
         
         # Store conversion data
         map_ls = [] # Slice -> Season
         map_ld = [] # Slice -> DayType
-        map_lh = [] # Slice -> Bracket
+        map_lh = [] # Slice -> DailyTimeBracket
 
         year_split_rows = []
         day_split_rows = []
@@ -106,7 +209,8 @@ class TimeComponent(ScenarioComponent):
         for s, s_val in s_fracs.items():
             for d, d_val in d_fracs.items():
                 for b, b_val in b_fracs.items():
-                    ts_name = f"{s}_{d}_{b}"
+                    ts_name = f"{self._sanitize(s)}_{self._sanitize(d)}_{self._sanitize(b)}"
+                    self.timeslice_name_map[ts_name] = (s, d, b)
                     timeslice_data.append(ts_name)
 
                     # Standard Mapping
@@ -122,59 +226,112 @@ class TimeComponent(ScenarioComponent):
 
                     # Calculate YearSplit (TimeSlice as a fraction of Year)
                     year_split_frac = slice_hours / self.HOURS_PER_YEAR
-                    
-                    for y in self.years:
-                        year_split_rows.append({
-                            "TIMESLICE": ts_name,
-                            "YEAR": y,
-                            "VALUE": round(year_split_frac, 9) # High precision required
-                        })
-
+                    for y in years:
+                        year_split_rows.append({"TIMESLICE": ts_name, "YEAR": y, "VALUE": round(year_split_frac, 9)})
                         # Calculate DayTypeSplit (DailyTimeBracket as a fraction of DayType)
                         # Should ideally correspond to Hours / 24
-                        day_split_rows.append({
-                            "DAILYTIMEBRACKET": b,
-                            "YEAR": y,
-                            "VALUE": round(b_val, 6)
-                        })
+                        day_split_rows.append({"DAILYTIMEBRACKET": b, "YEAR": y, "VALUE": round(b_val, 6)})
 
-        # 4. Validation
-        if not math.isclose(sum(timeslice_hours), self.HOURS_PER_YEAR, abs_tol=0.1):
-            print(f"WARNING: Total calculated time is {sum(timeslice_hours):.4f} hours per year. Please adjust your season/daytype/bracket definitions for better consistency.")
+        # 4. Validation and normalization for timeslice hours (YearSplit)
+        total_hours = sum(timeslice_hours)
+        if not math.isclose(total_hours, self.HOURS_PER_YEAR, abs_tol=self.TOL):
+            print(f"WARNING: Total calculated time is {total_hours:.4f} hours per year. Expected {self.HOURS_PER_YEAR}.\nPlease adjust your season/daytype/dailytimebracket definitions for better consistency.")
 
-        # 5. Write Files
-        self.write_csv("TIMESLICE.csv", timeslice_data)
-        self.write_dataframe("Conversionls.csv", pd.DataFrame(map_ls))
-        self.write_dataframe("Conversionld.csv", pd.DataFrame(map_ld))
-        self.write_dataframe("Conversionlh.csv", pd.DataFrame(map_lh))
-        self.write_dataframe("YearSplit.csv", pd.DataFrame(year_split_rows))
-        self.write_dataframe("DaySplit.csv", pd.DataFrame(day_split_rows).drop_duplicates())
+        # 5. Update class attributes
+        self.timeslices_df = pd.DataFrame({"TIMESLICE": timeslice_data})
+        self.conversionls_df = pd.DataFrame(map_ls)
+        self.conversionld_df = pd.DataFrame(map_ld)
+        self.conversionlh_df = pd.DataFrame(map_lh)
+        self.yearsplit_df = pd.DataFrame(year_split_rows)
+        self.daysplit_df = pd.DataFrame(day_split_rows).drop_duplicates()
 
-        # 6. DaysInDayType Calculation
+        # 6. Validation for YearSplit: enforce sum to 1.0 for each year
+        for y in years:
+            year_sum = self.yearsplit_df[self.yearsplit_df['YEAR'] == y]['VALUE'].sum()
+            if not math.isclose(year_sum, 1.0, abs_tol=self.TOL):
+                print(f"WARNING: YearSplit for year {y} sums to {year_sum}, expected 1.0.")
+
+        # 7. Validation for DaySplit: enforce sum to 1.0 for each year
+        for y in years:
+            day_sum = self.daysplit_df[self.daysplit_df['YEAR'] == y]['VALUE'].sum()
+            if not math.isclose(day_sum, 1.0, abs_tol=self.TOL):
+                print(f"WARNING: DaySplit for year {y} sums to {day_sum}, expected 1.0.")
+
+        # 8. DaysInDayType Calculation
         # Logic: 365 * SeasonFrac * DayTypeFrac
         didt_rows = []
         for s, s_val in s_fracs.items():
             for d, d_val in d_fracs.items():
-                days = self.DAYS_PER_YEAR * s_val * d_val
-                for y in self.years:
-                    didt_rows.append({
-                        "SEASON": s,
-                        "DAYTYPE": d,
-                        "YEAR": y,
-                        "VALUE": round(days, 4)
-                    })
-        self.write_dataframe("DaysInDayType.csv", pd.DataFrame(didt_rows))
-
+                didt_rows.append({"SEASON": s, "DAYTYPE": d, "VALUE": self.DAYS_PER_YEAR * s_val * d_val})
+        self.daysindaytype_df = pd.DataFrame(didt_rows)
 
         return timeslice_data, timeslice_hours
     
     def _normalize(self, data: dict):
-        """Normalizes inputs to sum to 1.0."""
+        """
+        Normalizes inputs to sum to 1.0.
+        """
         total = sum(data.values())
         if total == 0:
             return {k: 0 for k in data}
         return {k: v / total for k, v in data.items()}
+
+    def _sanitize(self, name):
+        """
+        Replace underscores in user-provided names with double underscores to avoid ambiguity.
+        """
+        return name.replace("_", "__")
     
+    def _unsanitize(self, name):
+        """
+        Revert double underscores back to single underscores.
+        """
+        return name.replace("__", "_")
+    
+    def _get_timeslice_components(self, timeslice_name):
+        """
+        Given a TIMESLICE name, returns its components (SEASON, DAYTYPE, DAILYTIMEBRACKET).
+        """
+        return self.timeslice_name_map.get(timeslice_name, (None, None, None))
+    
+    # === Static Methods ===
+    @staticmethod
+    def load_time_axis(scenario):
+        """
+        Loads and returns all time axis DataFrames and a slice_map for use in other components.
+        Returns:
+            dict: {
+                'yearsplit': DataFrame,
+                'conversionls': DataFrame,
+                'conversionld': DataFrame,
+                'conversionlh': DataFrame,
+                'slice_map': dict (TIMESLICE -> {'Season', 'DayType', 'DailyTimeBracket'})
+            }
+        """
+        # Load DataFrames
+        yearsplit = pd.read_csv(os.path.join(scenario.scenario_dir, "YearSplit.csv"))
+        conversionls = pd.read_csv(os.path.join(scenario.scenario_dir, "Conversionls.csv"))
+        conversionld = pd.read_csv(os.path.join(scenario.scenario_dir, "Conversionld.csv"))
+        conversionlh = pd.read_csv(os.path.join(scenario.scenario_dir, "Conversionlh.csv"))
+
+        # Build slice_map
+        slice_map = {}
+        for _, row in conversionls.iterrows():
+            slice_map.setdefault(row['TIMESLICE'], {})['Season'] = row['SEASON']
+        for _, row in conversionld.iterrows():
+            slice_map.setdefault(row['TIMESLICE'], {})['DayType'] = row['DAYTYPE']
+        for _, row in conversionlh.iterrows():
+            slice_map.setdefault(row['TIMESLICE'], {})['DailyTimeBracket'] = row['DAILYTIMEBRACKET']
+
+        return {
+            'yearsplit': yearsplit,
+            'conversionls': conversionls,
+            'conversionld': conversionld,
+            'conversionlh': conversionlh,
+            'slice_map': slice_map
+        }
+    
+    # === Visualization ===
     def visualize(self):
         """
         Creates a visualization of the timeslice structure.
@@ -195,29 +352,26 @@ class TimeComponent(ScenarioComponent):
         })
 
         # --- Load Data ---
+        self.load()
+        ys = self.yearsplit_df.copy()
         try:
-            ys = pd.read_csv(os.path.join(self.scenario_dir, "YearSplit.csv"))
-            try: 
-                didt = pd.read_csv(os.path.join(self.scenario_dir, "DaysInDayType.csv"))
-                didt['key'] = didt['SEASON'] + "_" + didt['DAYTYPE']
-                days_lookup = didt.groupby('key')['VALUE'].mean().to_dict()
-            except: days_lookup = {}
-            
-            cls = pd.read_csv(os.path.join(self.scenario_dir, "Conversionls.csv"))
-            cld = pd.read_csv(os.path.join(self.scenario_dir, "Conversionld.csv"))
-            clh = pd.read_csv(os.path.join(self.scenario_dir, "Conversionlh.csv"))
-            
-            slice_map = {}
-            for _, row in cls.iterrows():
-                slice_map.setdefault(row['TIMESLICE'], {})['Season'] = row['SEASON']
-            for _, row in cld.iterrows():
-                slice_map.setdefault(row['TIMESLICE'], {})['DayType'] = row['DAYTYPE']
-            for _, row in clh.iterrows():
-                slice_map.setdefault(row['TIMESLICE'], {})['DailyTimeBracket'] = row['DAILYTIMEBRACKET']
+            didt = self.daysindaytype_df.copy()
+            didt['key'] = didt['SEASON'] + "_" + didt['DAYTYPE']
+            days_lookup = didt.groupby('key')['VALUE'].mean().to_dict()
+        except Exception:
+            days_lookup = {}
 
-        except FileNotFoundError:
-            print("Error: Required CSVs not found.")
-            return
+        cls = self.conversionls_df.copy()
+        cld = self.conversionld_df.copy()
+        clh = self.conversionlh_df.copy()
+
+        slice_map = {}
+        for _, row in cls.iterrows():
+            slice_map.setdefault(row['TIMESLICE'], {})['Season'] = row['SEASON']
+        for _, row in cld.iterrows():
+            slice_map.setdefault(row['TIMESLICE'], {})['DayType'] = row['DAYTYPE']
+        for _, row in clh.iterrows():
+            slice_map.setdefault(row['TIMESLICE'], {})['DailyTimeBracket'] = row['DAILYTIMEBRACKET']
 
         rep_year = ys['YEAR'].min()
         ys = ys[ys['YEAR'] == rep_year]
