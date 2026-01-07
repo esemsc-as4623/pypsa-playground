@@ -365,3 +365,6 @@ vite.config.ts.timestamp-*
 .github/prompts/
 package-lock.json
 package.json
+
+# Demo files
+notebooks/demo_output/
