@@ -40,7 +40,8 @@ class DemandComponent(ScenarioComponent):
         super().__init__(scenario_dir)
 
         # Check prerequisites
-        self.yearsplit_df, self.years, self.regions = self.check_prerequisites()
+        self.years, self.regions = self.check_prerequisites()
+        self.time_axis = self.load_time_axis()
 
         # Demand parameters
         self.annual_demand_df = pd.DataFrame(columns=["REGION", "FUEL", "YEAR", "VALUE"])
@@ -58,9 +59,8 @@ class DemandComponent(ScenarioComponent):
         Raises an error if any prerequisite is missing.
         """
         # Check Time Component
-        yearsplit = self.read_csv("YearSplit.csv", ["TIMESLICE", "YEAR", "VALUE"])
         years = self.read_csv("YEAR.csv", ["YEAR"])["YEAR"].tolist()
-        if yearsplit.empty or not years:
+        if not years:
             raise AttributeError("Time component is not defined for this scenario.")
 
         # Check Topology Component
@@ -68,7 +68,27 @@ class DemandComponent(ScenarioComponent):
         if not regions:
             raise AttributeError("Topology component is not defined for this scenario.")
         
-        return yearsplit, years, regions
+        return years, regions
+    
+    def load_time_axis(self):
+        """
+        Load temporal resolution data from TimeComponent.
+        Returns a DataFrame with TIMESLICE, YEAR, VALUE, Season, DayType, DailyTimeBracket columns.
+        Raises an error if TimeComponent cannot be loaded.
+        """
+        try:
+            from pyoscomp.scenario.components.time import TimeComponent
+            time_data = TimeComponent.load_time_axis(self)
+
+            df = time_data['yearsplit'].copy()
+            slice_map = time_data['slice_map']
+
+            df['Season'] = df['TIMESLICE'].map(lambda x: slice_map[x]['Season'])
+            df['DayType'] = df['TIMESLICE'].map(lambda x: slice_map[x]['DayType'])
+            df['DailyTimeBracket'] = df['TIMESLICE'].map(lambda x: slice_map[x]['DailyTimeBracket'])
+            return df
+        except Exception as e:
+            raise AttributeError(f"Could not load time axis from TimeComponent: {e}")
 
     # === Load and Save Methods ===
     def load(self):
@@ -135,7 +155,7 @@ class DemandComponent(ScenarioComponent):
             raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
         self.defined_fuels.add((region, fuel))
 
-        # --- VALIDATION: Trajectory Provided, Non-negative, Deduplicated ---
+        # --- VALIDATION: Trajectory Provided, Non-negative ---
         if len(trajectory) == 0:
             raise ValueError(f"No trajectory points provided for {region}-{fuel}.")
         for y, val in trajectory.items():
@@ -264,7 +284,7 @@ class DemandComponent(ScenarioComponent):
             self.accumulated_demand_df = combined.drop_duplicates(subset=["REGION", "FUEL", "YEAR"], keep="last").reset_index(drop=True)
 
     def set_subannual_profile(self, region, fuel, year=None, timeslice_factor=None, 
-                              season_factor=None, day_factor=None, hourly_factor=None):
+                              season_factor=None, day_factor=None, time_factor=None):
         """
         Set the demand profile for a given region, fuel, and optionally year.
         Supports direct timeslice factors or hierarchical (season, day, hour) factors.
@@ -275,193 +295,159 @@ class DemandComponent(ScenarioComponent):
 
         :param region: str, Region where demand applies
         :param fuel: str, Name of the fuel/demand type
-        :param year: int or None, Model year, if not specified applies to all years
+        :param year: int, list[int] or None, Model year, if not specified applies to all years
         :param timeslice_factor: dict or None, {timeslice: factor}
         :param season_factor: dict or None, {season: factor}
         :param day_factor: dict or None, {daytype: factor}
-        :param hourly_factor: dict or None, {dailytimebracket: factor}
+        :param time_factor: dict or None, {dailytimebracket: factor}
 
         Example::
-            demand.set_subannual_profile('Region1', 'ELEC', timeslice_factor={'Winter_Weekday_Day': 0.6, ...})
-            demand.set_subannual_profile('Region1', 'ELEC', season_factor={'Winter': 1.2, 'Summer': 0.8}, hourly_factor={'Day': 1.5, 'Night': 0.5})
+            demand.set_subannual_profile('Region1', 'ELEC', year=2040, timeslice_factor={'Winter_Weekday_Day': 0.6, ...})
+            demand.set_subannual_profile('Region1', 'ELEC', year=[2028, 2032], season_factor={'Winter': 1.2, 'Summer': 0.8}, time_factor={'Day': 1.5, 'Night': 0.5})
         """
-
-        if timeslice_factor:
-            # Validate timeslice factors and fill missing with YearSplit proportions
-            timeslice_factor = self._check_timeslice_factors(timeslice_factor, year)
+        # --- VALIDATION: Region, Fuel, Year ---
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        self.defined_fuels.add((region, fuel))
+        if isinstance(year, int) and year not in self.years:
+            raise ValueError(f"Year {year} not defined in scenario years.")
+        if isinstance(year, list) and not all(y in self.years for y in year):
+            raise ValueError(f"One or more years in {year} not defined in scenario years.")
+        
+        if isinstance(year, int):
+            years = [year]
+        if isinstance(year, list):
+            years = year
+        if year is None:
+            years = [self.years[0]]
+        
+        for y in years:
+            # Create comprehensive timeslice factor dict
+            if timeslice_factor:
+                timeslice_factor = self._apply_timeslice_factors(timeslice_factor, y)
+            elif season_factor or day_factor or time_factor:
+                timeslice_factor = self._apply_hierarchical_factors(
+                    season_factor or {}, day_factor or {}, time_factor or {}, y
+                )
+            else:
+                print(f"Setting default (flat) profile for {region}, {fuel} in year {y}.")
+                return
+            # Normalize timeslice factors
             total = sum(timeslice_factor.values())
             if total <= 0:
-                print(f"Warning: Timeslice factors for {region}, {fuel} in year {year} sum to {total}. Using flat profile.")
-                self.profile_assignments[(region, fuel)] = {"type": "flat"}
+                print(f"Warning: Timeslice factors for {region}, {fuel} in year {y} sum to {total}. Using flat profile.")
+                self.profile_assignments[(region, fuel, y)] = {"type": "flat"}
             else:
                 norm_weights = {k: v/total for k, v in timeslice_factor.items()}
-                self.profile_assignments[(region, fuel)] = {"type": "custom", "weights": norm_weights}
-            return
-
-        if season_factor or day_factor or hourly_factor:
-            # Validate hierarchical factors and fill missing with YearSplit proportions
-
-            self.profile_assignments[(region, fuel)] = {
-                "type": "weighted",
-                "season_w": season_factor, "day_w": day_factor, "hour_w": hourly_factor
-            }
-            return
-
-        print(f"Setting flat profile for {region}, {fuel}.")
-        self.profile_assignments[(region, fuel)] = {"type": "flat"}
+                self.profile_assignments[(region, fuel, y)] = {"type": "custom", "weights": norm_weights}
+        # Apply to all years if year is None
+        if year is None:
+            for y in self.years[1:]:
+                self.profile_assignments[(region, fuel, y)] = self.profile_assignments[(region, fuel, years[0])]
 
     # === Processing ===
     def process(self):
         """
-        Generate the full demand profile for each (region, fuel, year, timeslice) combination, normalized so that the sum matches the annual demand.
+        Generate and update the full demand profile for each (region, fuel, year, timeslice) combination
+        based on self.profile_assignments.
+        Normalizes profiles so that the sum for each (region, fuel, year)
+        is exactly 1.0.
+        Updates self.profile_demand_df with the generated profiles.
         """
-        profile_rows = self._generate_all_profiles()
-        self.profile_demand_df = pd.DataFrame(profile_rows)
+        for region, fuel in self.defined_fuels:
+            for year in self.years:
+                if (region, fuel, year) not in self.profile_assignments:
+                    self.profile_assignments[(region, fuel, year)] = {"type": "flat"}
+        all_rows = []
+        for (region, fuel, year), assignment in self.profile_assignments.items():
+            rows = self._generate_profile(region, fuel, year, assignment)
+            all_rows.extend(rows)
+        normalized_rows = self._normalize_profile_rows(all_rows)
+        self.profile_demand_df = pd.DataFrame(normalized_rows)
 
     # === Internal Logic Helpers ===
-    def _check_timeslice_factors(self, factor_dict, year):
+    def _apply_timeslice_factors(self, factor_dict, year):
         """
-        Validates timeslice factors against YearSplit.csv.
-        Fills missing timeslices with their YearSplit proportions.
+        Applies timeslice factors using YearSplit.csv.
+        If a timeslice is missing in factor_dict, it uses the original YearSplit proportion.
+        If a timeslice is present, it multiplies the original YearSplit proportion by the provided factor.
         Returns a complete dict of timeslice factors.
         """
-        pass
-
-    def _generate_profile(self, region, fuel, year):
+        result = {}
+        for ts in self.time_axis["TIMESLICE"]:
+            original = self.time_axis.loc[(self.time_axis["YEAR"] == year) & 
+                                          (self.time_axis["TIMESLICE"] == ts), "VALUE"].values[0]
+            result[ts] = original * factor_dict.get(ts, 1)
+        return result
+    
+    def _apply_hierarchical_factors(self, season_factor, day_factor, hour_factor, year):
         """
-        Generates the demand profile for a specific (region, fuel, year) combination.
-        Returns a list of dictionaries with TIMESLICE and VALUE keys.
-
-        :param region: str, Region where the demand applies
-        :param fuel: str, Name of the fuel/demand type
-        :param year: int, Model year
+        Applies hierarchical factors to generate timeslice factors.
+        If a season/day/hour is missing in the respective factor dict, it uses the original YearSplit proportion.
+        If a season/day/hour is present, it multiplies the original YearSplit proportion by the provided factor.
+        Returns a complete dict of timeslice factors.
         """
-        pass
+        # Compute adjusted factors for each dimension
+        s_adj = {}
+        for season in self.time_axis["Season"].unique():
+            original = self.time_axis.loc[(self.time_axis["YEAR"] == year) & (self.time_axis["Season"] == season), "VALUE"].sum()
+            s_adj[season] = original * season_factor.get(season, 1)
+        d_adj = {}
+        for day in self.time_axis["DayType"].unique():
+            original = self.time_axis.loc[(self.time_axis["YEAR"] == year) & (self.time_axis["DayType"] == day), "VALUE"].sum()
+            d_adj[day] = original * day_factor.get(day, 1)
+        h_adj = {}
+        for hour in self.time_axis["DailyTimeBracket"].unique():
+            original = self.time_axis.loc[(self.time_axis["YEAR"] == year) & (self.time_axis["DailyTimeBracket"] == hour), "VALUE"].sum()
+            h_adj[hour] = original * hour_factor.get(hour, 1)
 
-    def _generate_all_profiles(self):
-        """
-        Iterates through defined fuels and calculates profile rows.
-        Returns a list of dictionaries.
-        """
-        all_profile_rows = []
-
-        for region, fuel in self.defined_fuels:
-            assignment = self.profile_assignments.get((region, fuel), {"type": "flat"})
-            p_type = assignment["type"]
-            
-            raw_rows = []
-
-            # A. Strategy Pattern for Calculation
-            if p_type == "custom":
-                raw_rows = self._calc_custom_profile(region, fuel, assignment["weights"], self.years)
-            
-            elif p_type == "weighted":
-                raw_rows = self._calc_weighted_profile(
-                    region, fuel, self.yearsplit_df, self.years,
-                    assignment.get("season_w"), assignment.get("day_w"), assignment.get("hour_w")
-                )
-            
-            else: # Flat (Default)
-                raw_rows = self._calc_flat_profile(region, fuel, self.yearsplit_df, self.years)
-
-            # B. Normalization Step (Strict Summation to 1.0)
-            cleaned_rows = self._normalize_and_fix_residuals(raw_rows)
-            all_profile_rows.extend(cleaned_rows)
-            
-        return all_profile_rows
-
-    def _calc_flat_profile(self, region, fuel, year_split_df, years):
-        rows = []
-        for y in years:
-            ys_subset = year_split_df[year_split_df['YEAR'] == y]
-            if ys_subset.empty:
-                ys_subset = year_split_df[year_split_df['YEAR'] == year_split_df['YEAR'].min()]
-
-            for _, row in ys_subset.iterrows():
-                rows.append({
-                    "REGION": region, "FUEL": fuel,
-                    "TIMESLICE": row['TIMESLICE'], "YEAR": y,
-                    "VALUE": row['VALUE'] 
-                })
-        return rows
-
-    def _calc_custom_profile(self, region, fuel, profile_dict, years):
-        rows = []
-        total = sum(profile_dict.values())
-        if total == 0:
-            return []
-
-        for y in years:
-            for ts, val in profile_dict.items():
-                rows.append({
-                    "REGION": region, "FUEL": fuel,
-                    "TIMESLICE": ts, "YEAR": y,
-                    "VALUE": val / total
-                })
-        return rows
-
-    def _calc_weighted_profile(self, region, fuel, year_split_df, years, s_w, d_w, h_w):
-        rows = []
-        s_w = s_w or {}
-        d_w = d_w or {}
-        h_w = h_w or {}
-
-        # Representative year for shape
-        rep_year = year_split_df['YEAR'].min()
-        unique_slices = year_split_df[year_split_df['YEAR'] == rep_year][['TIMESLICE', 'VALUE']]
+        result = {}
+        for _, ts_row in self.time_axis.iterrows():
+            ts = ts_row["TIMESLICE"]
+            s, d, h = ts_row["Season"], ts_row["DayType"], ts_row["DailyTimeBracket"]
+            result[ts] = s_adj[s] * d_adj[d] * h_adj[h]
+        return result
         
-        slice_scores = {}
-        total_score = 0
-        
-        for _, row in unique_slices.iterrows():
-            ts = row['TIMESLICE']
-            duration_frac = row['VALUE']
-            
-            parts = ts.split('_')
-            s = parts[0] if len(parts) > 0 else "Unknown"
-            d = parts[1] if len(parts) > 1 else "Unknown"
-            h = parts[2] if len(parts) > 2 else "Unknown"
-            
-            weight = s_w.get(s, 1.0) * d_w.get(d, 1.0) * h_w.get(h, 1.0)
-            score = weight * duration_frac
-            slice_scores[ts] = score
-            total_score += score
 
-        for y in years:
-            for ts, score in slice_scores.items():
-                final_val = score / total_score if total_score > 0 else 0
-                rows.append({
-                    "REGION": region, "FUEL": fuel,
-                    "TIMESLICE": ts, "YEAR": y,
-                    "VALUE": final_val
-                })
-        return rows
-
-    def _normalize_and_fix_residuals(self, rows):
+    def _generate_profile(self, region, fuel, year, assignment):
         """
-        Ensures the sum of profiles for every (Region, Fuel, Year) is EXACTLY 1.0.
-        Fixes floating point errors (e.g., 0.9999999) by adjusting the largest slice.
-        Prints a message if any correction is made.
+        Generate the demand profile rows for a specific (region, fuel, year) and assignment.
+        Returns a list of dicts with keys: REGION, FUEL, TIMESLICE, YEAR, VALUE.
+        Handles 'custom' and 'flat' assignment types. Defaults to 'flat' if type is unrecognized.
+        """
+        p_type = assignment.get("type", "flat")
+        if p_type == "custom":
+            weights = assignment["weights"]
+            return [
+                {"REGION": region, "FUEL": fuel, "TIMESLICE": ts, "YEAR": year, "VALUE": weights[ts]}
+                for ts in weights
+            ]
+        else:  # Flat profile or fallback
+            # Use the default yearsplit for the year
+            ys = self.time_axis[self.time_axis["YEAR"] == year]
+            return [
+                {"REGION": region, "FUEL": fuel, "TIMESLICE": row["TIMESLICE"], "YEAR": year, "VALUE": row["VALUE"]}
+                for _, row in ys.iterrows()
+            ]
+
+    def _normalize_profile_rows(self, rows):
+        """
+        Normalize the profile rows so that the sum of 'VALUE' for each (REGION, FUEL, YEAR) is exactly 1.0.
+        Adjusts the largest timeslice to fix floating point errors.
+        Returns a list of normalized dicts.
         """
         if not rows:
             return []
         df = pd.DataFrame(rows)
-        # Group by (REGION, FUEL, YEAR) for full generality
-        group_cols = [col for col in ["REGION", "FUEL", "YEAR"] if col in df.columns]
-        if not group_cols:
-            return rows
+        group_cols = ["REGION", "FUEL", "YEAR"]
         sums = df.groupby(group_cols)['VALUE'].sum()
         for idx, total in sums.items():
             if not np.isclose(total, 1.0, atol=1e-9):
                 residual = 1.0 - total
-                if isinstance(idx, tuple):
-                    mask = (df[group_cols[0]] == idx[0]) & (df[group_cols[1]] == idx[1]) & (df[group_cols[2]] == idx[2])
-                else:
-                    mask = (df[group_cols[0]] == idx)
+                mask = (df[group_cols[0]] == idx[0]) & (df[group_cols[1]] == idx[1]) & (df[group_cols[2]] == idx[2])
                 idx_to_fix = df.loc[mask, 'VALUE'].idxmax()
                 df.at[idx_to_fix, 'VALUE'] += residual
                 df.loc[mask, 'VALUE'] = df.loc[mask, 'VALUE'].round(9)
-                print(f"Auto-corrected demand profile for {idx}: sum was {total}, fixed residual {residual}.")
         return df.to_dict('records')
 
     # === Visualization ===
@@ -485,48 +471,31 @@ class DemandComponent(ScenarioComponent):
         
         # --- Load Data ---
         self.load()
-        if self.profile_demand_df.empty:
-            print("No demand profile data to plot.")
-            return
-        if (region, fuel) not in self.defined_fuels:
-            print(f"Error: No demand defined for {region} - {fuel}")
-            return
 
-        df_annual = self.annual_demand_df[(self.annual_demand_df['REGION'] == region) &
-                                          (self.annual_demand_df['FUEL'] == fuel)]
-        
-        try:
-            from pyoscomp.scenario.components.time import TimeComponent
-            slice_map = TimeComponent.load_time_axis(self)['slice_map']
-        except Exception as e:
-            print(f"Could not load time axis: {e}")
-            return
-        
-        # Filter profiles to only the selected region and fuel
-        original_defined = self.defined_fuels
-        self.defined_fuels = {(region, fuel)}
-        profile_rows = self._generate_all_profiles()
-        df_profile = pd.DataFrame(profile_rows)
-        # Restore global defined fuels
-        self.defined_fuels = original_defined
+        df_annual = self.annual_demand_df[
+            (self.annual_demand_df['REGION'] == region) &
+            (self.annual_demand_df['FUEL'] == fuel)
+        ]
+        df_profile = self.profile_demand_df[
+            (self.profile_demand_df['REGION'] == region) &
+            (self.profile_demand_df['FUEL'] == fuel)
+        ]
 
-        # --- Process Data ---
         merged = pd.merge(df_annual, df_profile, on='YEAR')
         merged['ABS_VALUE'] = merged['VALUE_x'] * merged['VALUE_y']
-        
+
         plot_data = merged.pivot(index='YEAR', columns='TIMESLICE', values='ABS_VALUE')
         plot_data = plot_data.reindex(sorted(plot_data.columns), axis=1)
-        
+
+        # --- Process Data ---
         data = []
         seasons = set()
         daytypes = set()
         timebrackets = set()
 
         for ts in plot_data.columns:
-            meta = slice_map.get(ts, {})
-            season = meta.get('Season', 'Unknown')
-            daytype = meta.get('DayType', 'Unknown')
-            timebracket = meta.get('DailyTimeBracket', 'Unknown')
+            row = self.time_axis.loc[self.time_axis["TIMESLICE"] == ts].iloc[0]
+            season, daytype, timebracket = row["Season"], row["DayType"], row["DailyTimeBracket"]
             
             seasons.add(season)
             daytypes.add(daytype)
@@ -561,7 +530,6 @@ class DemandComponent(ScenarioComponent):
 
         # --- Formatting ---
         ax.set_ylabel("Energy Demand (Model Units)")
-        ax.set_xlabel("Year")
         ax.tick_params(axis='x', labelrotation=45)
         ax.set_title(f"Demand Composition: {region} - {fuel}")
 
@@ -586,9 +554,9 @@ class DemandComponent(ScenarioComponent):
         import matplotlib.pyplot as plt
 
         # --- Styles ---
-        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00']
+        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00'][::-2]
         plt.rcParams.update({
-            'font.size': 14, 
+            'font.size': 20, 
             'text.color': 'black',
             'axes.labelcolor': 'black',
             'xtick.color': 'black',
@@ -598,8 +566,8 @@ class DemandComponent(ScenarioComponent):
 
         # --- Load Data ---
         self.load()
-        if self.profile_demand_df.empty:
-            print("No demand profile data to plot.")
+        if self.annual_demand_df.empty:
+            print("No annual demand data to visualize.")
             return
         
         # Get all unique regions and fuels
@@ -607,8 +575,7 @@ class DemandComponent(ScenarioComponent):
         fuels = sorted(self.profile_demand_df['FUEL'].unique())
         n_regions = len(regions)
 
-        ncols = 2 if n_regions > 1 else 1
-        nrows = (n_regions + ncols - 1) // ncols
+        ncols, nrows = 1, n_regions
 
         # --- Plotting ---
         fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(12 * ncols, 7 * nrows))
@@ -620,6 +587,9 @@ class DemandComponent(ScenarioComponent):
         # Prepare color cycle for all fuels (consistent across regions)
         fuel_color_map = {fuel: CB_PALETTE[i % len(CB_PALETTE)] for i, fuel in enumerate(fuels)}
         handles = []
+
+        # Track global x/y limits
+        global_ys, global_xs = [], []
 
         for idx, region in enumerate(regions):
             ax = axes[idx]
@@ -649,83 +619,29 @@ class DemandComponent(ScenarioComponent):
             colors = [fuel_color_map[fuel] for fuel in fuel_names]
             polys = ax.stackplot(years, y_arrays, labels=fuel_names, colors=colors, alpha=0.8)
             ax.set_title(f"Region: {region}")
-            ax.set_xlabel("Year")
             ax.set_ylabel("Total Demand (Model Units)")
             ax.grid(axis='y', linestyle='--', alpha=0.3)
             # Only collect handles for the first subplot (for global legend)
             if idx == 0:
                 handles = [plt.Line2D([0], [0], color=fuel_color_map[fuel], lw=6) for fuel in fuel_names]
-
+            global_ys.append(ax.get_ylim())
+            global_xs.append(ax.get_xlim())
+        
         # --- Formatting ---
+        # Set shared axis limits
+        y_min = min([y[0] for y in global_ys])
+        y_max = max([y[1] for y in global_ys])
+        x_min = min([x[0] for x in global_xs])
+        x_max = max([x[1] for x in global_xs])
+        for ax in axes:
+            ax.set_ylim(y_min, y_max)
+            ax.set_xlim(x_min, x_max)
         # Hide any unused subplots
         for j in range(idx + 1, len(axes)):
             fig.delaxes(axes[j])
         # Add a global legend for all fuels at the top
         if handles:
-            fig.legend(handles, fuels, loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=min(len(fuels), 5), title="Fuel")
-        plt.tight_layout(rect=[0, 0, 1, 0.97])
-        plt.show()
-        # Hide any unused subplots
-        for j in range(idx + 1, len(axes)):
-            fig.delaxes(axes[j])
+            fig.legend(handles, fuels, loc='upper center', bbox_to_anchor=(0.5, 1.05),
+                       ncol=min(len(fuels), 5), title="Fuel", prop={'size': 20}, title_fontsize=22)
         plt.tight_layout()
         plt.show()
-
-    # TODO: complete compare_demand method
-    @staticmethod
-    def compare_demand(scenario1, scenario2, scale="annual", keys=None, rel_tol=1e-6):
-        """
-        Blueprint for comparing demand between two scenarios.
-
-        Parameters
-        ----------
-        scenario1 : DemandComponent
-            The first scenario instance (already loaded).
-        scenario2 : DemandComponent
-            The second scenario instance (already loaded).
-        compare_type : str
-            Type of comparison: "annual" for SpecifiedAnnualDemand, "profile" for SpecifiedDemandProfile,
-            or "accumulated" for AccumulatedAnnualDemand.
-        keys : list or None
-            List of columns to use as join keys (e.g., ["REGION", "FUEL", "YEAR"] for annual,
-            ["REGION", "FUEL", "YEAR", "TIMESLICE"] for profile).
-            If None, use sensible defaults based on compare_type.
-        rel_tol : float
-            Relative tolerance for highlighting significant differences.
-
-        Returns
-        -------
-        diff_df : pd.DataFrame
-            DataFrame with columns for keys, values from both scenarios, absolute and relative differences.
-            (e.g., REGION, FUEL, YEAR, VALUE_scenario1, VALUE_scenario2, ABS_DIFF, REL_DIFF)
-        
-        Notes
-        -----
-        - This method should not modify either scenario.
-        - It should handle missing keys gracefully (e.g., fill with NaN or 0).
-        - It should be able to highlight where differences exceed rel_tol.
-        - Visualization or summary reporting can be added as a follow-up.
-        - Example usage:
-            diff = DemandComponent.compare_demand(scen1, scen2, scale="annual")
-        """
-        # 1. Select the appropriate DataFrame from each scenario based on compare_type
-        #    (e.g., scenario1.annual_demand_df, scenario2.profile_demand_df, etc.)
-        # 2. Determine join keys if not provided.
-        # 3. Merge the two DataFrames on the join keys.
-        # 4. Compute absolute and relative differences.
-        # 5. Optionally, flag or filter rows where difference exceeds rel_tol.
-        # 6. Return the resulting DataFrame for further analysis or visualization.
-        pass  # Implementation to be added
-
-# TODO: Validation and Error Handling
-# a. Input Validation
-# Check for missing or invalid regions, fuels, years, timeslices before adding or processing demand. Raise clear errors if any are missing or not defined in the scenario.
-# Validate demand values: Ensure all demand values are non-negative and numeric. Warn or error on negative or NaN values.
-# Profile normalization: When setting profiles, ensure the sum of weights (for timeslice, season, day, hour) is not zero and is normalized to 1.0. If not, auto-normalize and warn the user.
-# b. Consistency Checks
-# Annual vs. Profile Consistency: When both annual and profile demand are set, check that the sum of the profile for each (region, fuel, year) matches the annual demand. If not, either auto-scale or raise a warning.
-# Timeslice completeness: Ensure that all timeslices for each year are covered in the profile. If not, fill missing timeslices with zero or raise an error.
-# c. Edge Case Handling
-# Partial years/timeslices: If a user provides demand for only a subset of years or timeslices, fill missing entries with zeros or provide a clear error.
-# Zero demand: Handle zero-demand years/timeslices gracefully (do not drop them from output).
-# Multiple profiles: If a user sets multiple profiles for the same (region, fuel, year), decide whether to overwrite, sum, or error, and document this behavior.

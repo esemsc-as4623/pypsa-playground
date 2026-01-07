@@ -303,9 +303,6 @@ class TimeComponent(ScenarioComponent):
         Returns:
             dict: {
                 'yearsplit': DataFrame,
-                'conversionls': DataFrame,
-                'conversionld': DataFrame,
-                'conversionlh': DataFrame,
                 'slice_map': dict (TIMESLICE -> {'Season', 'DayType', 'DailyTimeBracket'})
             }
         """
@@ -326,9 +323,6 @@ class TimeComponent(ScenarioComponent):
 
         return {
             'yearsplit': yearsplit,
-            'conversionls': conversionls,
-            'conversionld': conversionld,
-            'conversionlh': conversionlh,
             'slice_map': slice_map
         }
     
