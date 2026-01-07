@@ -144,6 +144,7 @@ class TimeComponent(ScenarioComponent):
         :param years_input: 
             list[int] (specific years e.g. [2020, 2025]) 
             OR tuple (start, end, step) e.g. (2020, 2050, 5)
+        :return: list[int] The list of years
         """
         if isinstance(years_input, (list, set)):
             years = sorted(list(years_input))
