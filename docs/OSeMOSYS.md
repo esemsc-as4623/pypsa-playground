@@ -17,62 +17,88 @@ OSeMOSYS is a linear programming optimization model for long-term energy system 
 **Objective Function**: Minimize total discounted cost across all regions and years
 
 ## Model Architecture
+```mermaid
+graph TD
 
-    subgraph "Input Data Layer"
+    %% =========================
+    %% Input Data Layer
+    %% =========================
+    subgraph Input_Data_Layer["Input Data Layer"]
         A[Sets: Regions, Technologies, Fuels, Years]
         B[Demand Parameters]
+        C[Performance Parameters]
+        D[Cost Parameters]
         E[Constraint Parameters]
     end
-    
-    subgraph "Core Model Components"
+
+    %% =========================
+    %% Core Model Components
+    %% =========================
+    subgraph Core_Model_Components["Core Model Components"]
         F[Capacity Planning]
+        G[Technology Dispatch]
+        H[Energy Balance]
         I[Storage Management]
         J[Cost Accounting]
     end
-    
-    subgraph "Constraints"
+
+    %% =========================
+    %% Constraints
+    %% =========================
+    subgraph Constraints["Constraints"]
         K[Capacity Constraints]
         L[Activity Limits]
         M[Emissions Limits]
         N[Reserve Margin]
         O[RE Targets]
-    subgraph "Output Results"
+    end
+
+    %% =========================
+    %% Output Results
+    %% =========================
+    subgraph Output_Results["Output Results"]
         P[New Capacity Investments]
         Q[Technology Activity]
-        R[Production/Use by Fuel]
+        R[Production / Use by Fuel]
         S[Total System Cost]
         T[Emissions]
     end
-    
+
+    %% =========================
+    %% Data Flow
+    %% =========================
     A --> F
     B --> H
     C --> F
     D --> J
     E --> K
     E --> L
+
     F --> G
     G --> H
     F --> I
     G --> I
-    
+
     H --> J
     F --> J
-    
+
     L --> G
     M --> G
     N --> F
     O --> G
-    
+
     F --> P
     G --> Q
-    G --> T
+    H --> R
+    J --> S
+    M --> T
 ```
 
 ## Sets (Dimensions)
 
 Sets define the dimensions over which the model operates. All parameters and variables are indexed by combinations of these sets.
 
-### Comprehensive Set Examples
+### Examples
 #### YEAR
 Model planning horizon. Years don't need to be consecutive but should span your planning period.
 ```
@@ -83,15 +109,15 @@ YEAR = {2020, 2025, 2030, 2035, 2040, 2045, 2050}
 
 #### TECHNOLOGY
 
-**Example comprehensive set**:
+**Example**:
 ```
+{
     COAL_IGCC,       # Integrated gasification combined cycle
     GAS_OCGT,        # Open cycle gas turbine (peaking)
     SOLAR_PV_ROOF,   # Rooftop solar PV
     WIND_ON,         # Onshore wind
     WIND_OFF,        # Offshore wind
     HYDRO_LARGE,     # Large hydro (dam)
-    DIST_URBAN,      # Urban distribution network
     
     # Fossil Fuel Supply
     COAL_MINE_DOM,   # Domestic coal mining
@@ -108,33 +134,6 @@ YEAR = {2020, 2025, 2030, 2035, 2040, 2045, 2050}
     H2_SMR,          # Steam methane reforming
     H2_SMR_CCS,      # SMR with carbon capture
     H2_FC,           # Hydrogen fuel cell
-    
-    # Transport
-    CAR_ICE_PET,     # Petrol internal combustion vehicle
-    CAR_ICE_DIE,     # Diesel internal combustion vehicle
-    CAR_HEV,         # Hybrid electric vehicle
-    CAR_PHEV,        # Plug-in hybrid
-    CAR_BEV,         # Battery electric vehicle
-    CAR_FCEV,        # Fuel cell electric vehicle
-    BUS_CONV,        # Conventional bus
-    BUS_ELEC,        # Electric bus
-    TRUCK_DIE,       # Diesel truck
-    TRUCK_LNG,       # LNG truck
-    
-    # Heating
-    HEAT_BOILER_GAS, # Gas boiler
-    HEAT_BOILER_OIL, # Oil boiler
-    HEAT_ELEC,       # Electric heating
-    HEAT_PUMP_AIR,   # Air source heat pump
-    HEAT_PUMP_GND,   # Ground source heat pump
-    HEAT_SOLAR,      # Solar thermal
-    HEAT_BIOMASS,    # Biomass heating
-    
-    # Industry
-    IND_BOILER_COAL, # Industrial coal boiler
-    IND_BOILER_GAS,  # Industrial gas boiler
-    IND_MOTOR_ELEC,  # Industrial electric motor
-    IND_FURNACE      # Industrial furnace
 }
 ```
 
@@ -150,9 +149,7 @@ FUEL = {
     GAS_NAT,         # Natural gas
     OIL_CRUDE,       # Crude oil
     URANIUM,         # Nuclear fuel
-    BIOMASS_SOLID,   # Solid biomass (wood, pellets)
-    BIOMASS_GAS,     # Biogas
-    BIOMASS_LIQ,     # Liquid biofuels
+    BIOMASS,         # Solid biomass (wood, pellets)
     
     # Secondary Energy - Electricity
     ELEC_HV,         # High voltage electricity
@@ -184,9 +181,6 @@ FUEL = {
     HEAT_IND_DEMAND, # Industrial heat demand
     TRANSPORT_PASS,  # Passenger transport demand (pkm)
     TRANSPORT_FREIGHT, # Freight transport demand (tkm)
-    
-    # Emissions (treated as fuels in some formulations)
-    CO2_EMITTED,     # CO2 emissions
     
     # Renewable Resources
     WIND_RESOURCE,   # Wind resource (abstract)
@@ -250,7 +244,7 @@ Modes allow a single technology to operate in different ways with different effi
    - MODE1 = Produces gasoline and diesel (60/40)
    - MODE2 = Produces gasoline and diesel (40/60)
 
-**Simple Example**:
+**Default Setup**:
 ```
 MODE_OF_OPERATION = {MODE1}  # Single mode - simplest setup
 ```
@@ -277,12 +271,6 @@ OutputActivityRatio[GAS_CCGT, HEAT_DISTRICT, MODE2] = 0.35/0.80 = 0.4375
   - Emission rates
 - Total activity of a technology = sum of activities across all modes
 - Modes don't affect capital costs (technology is the same unit)
-
-**Default Setup**:
-Most simple models use a single mode:
-```
-MODE_OF_OPERATION = {MODE1}
-```
 
 #### REGION
 Geographic or political boundaries. Can be countries, states, or grid zones.
@@ -399,7 +387,6 @@ STORAGE = {
     H2_TANK,             # Above-ground hydrogen tanks
     HEAT_TANK,           # Thermal storage tank
     ICE_STORAGE,         # Ice storage (cooling)
-    FLYWHEEL             # Flywheel storage
 }
 ```
 
@@ -1525,7 +1512,6 @@ This is **complex architectural translation** requiring user specification of re
 1. **Check planning.md**: Verify if feature has documented translation approach
 2. **Manual specification**: Use OSeMOSYS parameter files directly for unsupported constraints
 3. **Post-processing**: Apply policy constraints (RE targets, emission limits) via result validation rather than model constraints
-4. **Request enhancement**: Submit feature request with use case justification if critical for workflow
 
 ---
 
