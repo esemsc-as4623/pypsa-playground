@@ -114,7 +114,6 @@ class DemandComponent(ScenarioComponent):
         Save all demand parameter DataFrames to CSV files in the scenario directory.
         Uses write_dataframe from base class.
         """
-        
         # Annual
         df = self.annual_demand_df[["REGION", "FUEL", "YEAR", "VALUE"]].sort_values(by=["REGION", "FUEL", "YEAR"])
         self.write_dataframe("SpecifiedAnnualDemand.csv", df)
