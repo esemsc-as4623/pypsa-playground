@@ -596,7 +596,6 @@ class SupplyComponent(ScenarioComponent):
         pass
     
     # === Visualization ===
-    
     def visualize_capacity_mix(self, region, year=None, by_fuel=False, ax=None):
         """
         Visualize the technology capacity mix for a region.

@@ -29,23 +29,9 @@ pyoscomp/
 
 [] OS-agnostic path handling
     - use `os.path.join(self.scenario_dir, filename)`
-[] Deterministic ordering
-    - reduce reliance on Python dictionary built-in preservation of insertion order
-    - sort keys in `process_time_structure` before iterating (`s_fracs = dict(sorted(self._normalize(seasons).items()))`)
-[] Name sanitization
-    - user can provide names with space or comma
-    - add validator in base component to ensure names are alphanumeric or underscores only
-[] Precision handling
-    - add validation step at the end of `process_time_structure` to assert that for every year, the sum of `YearSplit` = 1.0 with small epsilon
 [] Enum + error handling to enforce valid choices
-[] Duplication handling
-    - ensure `self.annual_demand_data` does not accept duplicate rows from user input
 [] Dataclasses or NamedTuples
     - to store profile configuration
-[] Define constants at the top of the class
-    - for each column (e.g. REGION, TIMESLICE, YEAR, etc.)
 [] Case sensitive matching
     - season, daytype, dailytimebracket
     - validate keys during `process` phase
-[] Trend function
-    - accept (year, prev_value) for recursive / compound logic
