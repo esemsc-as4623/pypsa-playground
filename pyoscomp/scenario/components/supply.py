@@ -6,6 +6,7 @@ Note: this component handles technology / generator definitions and supply-side 
 Supply is provided by a TECHNOLOGY in OSeMOSYS terminology, and by a Generator in PyPSA terminology.
 """
 import pandas as pd
+import numpy as np
 
 from .base import ScenarioComponent
 
@@ -36,7 +37,6 @@ class SupplyComponent(ScenarioComponent):
         super().__init__(scenario_dir)
 
         # Check prerequisites
-        # TODO: modularize instead of copying from demand.py
         self.years, self.regions = self.check_prerequisites(time=True, topology=True)
         self.time_axis = self.load_time_axis()
 
@@ -55,7 +55,7 @@ class SupplyComponent(ScenarioComponent):
         self.mode_definitions = {}                   # (Region, Technology) -> [Mode1, Mode2, ...]
         self.defined_fuels = set()                   # Set of all fuels referenced in activity ratios
 
-    # === Prerequisite Check ===
+    # === Prerequisite Check === # TODO: modularize instead of copying from demand.py
     def check_prerequisites(self, **kwargs):
         """
         Check that required components (Time, Topology) are initialized in the scenario.
@@ -162,8 +162,8 @@ class SupplyComponent(ScenarioComponent):
         self.write_dataframe("OutputActivityRatio.csv", df)
 
     # === User Input Methods ===
-    def add_technology(self, region, technology, operational_life, 
-                      capacity_to_activity_unit=31.536):
+    def add_technology(self, region, technology, operational_life: int, 
+                       capacity_to_activity_unit=31.536):
         """
         Register a new technology in the scenario with basic metadata.
         This is the entry point for defining any supply technology.
@@ -178,8 +178,28 @@ class SupplyComponent(ScenarioComponent):
             supply.add_technology('Region1', 'COAL_PP', operational_life=40, capacity_to_activity_unit=31.536)
             supply.add_technology('Region1', 'WIND_ONSHORE', operational_life=25)
         """
-        pass
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        self.defined_tech.add((region, technology))
 
+        # --- VALIDATION: Operational Life Provided, Non-negative ---
+        if operational_life <= 0:
+            raise ValueError(f"Operational life cannot be negative for technology '{technology}' in region '{region}'.")
+        
+        # Append to DataFrame
+        df_new1 = pd.DataFrame([{"REGION": region, "TECHNOLOGY": technology, "VALUE": operational_life}])
+        df_new2 = pd.DataFrame([{"REGION": region, "TECHNOLOGY": technology, "VALUE": capacity_to_activity_unit}])
+        for attr_name, df_new in [("capacity_to_activity_unit", df_new2), ("operational_life", df_new1)]:
+            current_df = getattr(self, attr_name)
+            if current_df.empty:
+                setattr(self, attr_name, df_new)
+            else:
+                # Merge on REGION, TECHNOLOGY
+                combined = pd.concat([current_df, df_new], ignore_index=True)
+                # Keep the last occurrence (i.e. new data overwrites old)
+                merged_df = combined.drop_duplicates(subset=["REGION", "TECHNOLOGY"], keep='last').reset_index(drop=True)
+                setattr(self, attr_name, merged_df)
+    
     def set_conversion_technology(self, region, technology, input_fuel, output_fuel,
                                   efficiency, mode='MODE1', year=None):
         """
@@ -208,7 +228,58 @@ class SupplyComponent(ScenarioComponent):
                                             output_fuel='ELEC',
                                             efficiency={2020: 0.18, 2030: 0.22, 2040: 0.25})
         """
-        pass
+        # --- VALIDATION: Region, Technology, Year, Fuel, Efficiency ---
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        if (region, technology) not in self.defined_tech:
+            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+        self.defined_tech.add((region, technology))
+        if isinstance(year, int) and year not in self.years:
+            raise ValueError(f"Year {year} not defined in scenario years.")
+        if isinstance(year, list) and not all(y in self.years for y in year):
+            raise ValueError(f"One or more years in {year} not defined in scenario years.")
+        if input_fuel == output_fuel:
+            raise ValueError("Input and output fuel must be different.")
+        if isinstance(efficiency, dict):
+            for y, val in efficiency.items():
+                if not (0 < val <= 1):
+                    raise ValueError(f"Efficiency for year {y} must be in (0, 1].")
+        else:
+            if not (0 < efficiency <= 1):
+                raise ValueError("Efficiency must be in (0, 1].")
+        
+        if isinstance(year, int):
+            years = [year]
+        if isinstance(year, list):
+            years = year
+        if year is None:
+            years = self.years
+        
+        # Map year to efficiency
+        if isinstance(efficiency, dict):
+            eff_map = {y: efficiency.get(y, list(efficiency.values())[0]) for y in years}
+        else:
+            eff_map = {y: efficiency for y in years}
+        
+        # Compute input/output activity ratios
+        input_records, output_records = [], []
+        for y in years:
+            eff = eff_map[y]
+            input_ratio, output_ratio = self._apply_efficiency_to_ratios(eff, mode=mode)
+            input_records.append({"REGION": region, "TECHNOLOGY": technology, "FUEL": input_fuel, "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": input_ratio})
+            output_records.append({"REGION": region, "TECHNOLOGY": technology, "FUEL": output_fuel, "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": output_ratio})
+        
+        self.input_activity_ratio = self.add_to_dataframe(self.input_activity_ratio, input_records,
+                                                          key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
+        self.output_activity_ratio = self.add_to_dataframe(self.output_activity_ratio, output_records,
+                                                           key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
+        self.defined_fuels.add(input_fuel)
+        self.defined_fuels.add(output_fuel)
+
+        if (region, technology) not in self.mode_definitions:
+            self.mode_definitions[(region, technology)] = []
+        if mode not in self.mode_definitions[(region, technology)]:
+            self.mode_definitions[(region, technology)].append(mode)
 
     def set_multimode_technology(self, region, technology, modes_config):
         """
@@ -248,10 +319,40 @@ class SupplyComponent(ScenarioComponent):
                 }
             })
         """
-        pass
+        # --- VALIDATION: Region, Technology, Mode ---
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        if (region, technology) not in self.defined_tech:
+            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+        self.defined_tech.add((region, technology))
+        self._validate_mode_configuration(modes_config)
+
+        if (region, technology) not in self.mode_definitions:
+            self.mode_definitions[(region, technology)] = []
+        input_records, output_records = [], []
+
+        for mode, config in modes_config.items():
+            if mode not in self.mode_definitions[(region, technology)]:
+                self.mode_definitions[(region, technology)].append(mode)
+            inputs, outputs = config.get('inputs', {}), config.get('outputs', {})
+            
+            for y in self.years:
+                # Inputs
+                for fuel, ratio in inputs.items():
+                    input_records.append({"REGION": region, "TECHNOLOGY": technology, "FUEL": fuel, "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio})
+                    self.defined_fuels.add(fuel)
+                # Outputs
+                for fuel, ratio in outputs.items():
+                    output_records.append({"REGION": region, "TECHNOLOGY": technology, "FUEL": fuel, "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio})
+                    self.defined_fuels.add(fuel)
+        # Merge records
+        self.input_activity_ratio = self.add_to_dataframe(self.input_activity_ratio, input_records,
+                                                          key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
+        self.output_activity_ratio = self.add_to_dataframe(self.output_activity_ratio, output_records,
+                                                           key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
 
     def set_resource_technology(self, region, technology, output_fuel, 
-                               resource_availability=None):
+                                resource_availability=None):
         """
         Define a resource extraction/harvesting technology (e.g., renewables, mining).
         These technologies typically have no input fuel, just produce from a resource.
@@ -267,24 +368,64 @@ class SupplyComponent(ScenarioComponent):
         Example::
             # Wind turbine - no input fuel, produces electricity
             supply.set_resource_technology('Region1', 'WIND_ONSHORE', 
-                                          output_fuel='ELEC',
-                                          resource_availability=0.35)
+                                           output_fuel='ELEC',
+                                           resource_availability=0.35)
             
             # Hydroelectric with varying availability
             supply.set_resource_technology('Region1', 'HYDRO_ROR',
-                                          output_fuel='ELEC',
-                                          resource_availability={2020: 0.45, 2030: 0.42, 2040: 0.40})
+                                           output_fuel='ELEC',
+                                           resource_availability={2020: 0.45, 2030: 0.42, 2040: 0.40})
         """
-        pass
+        # --- VALIDATION: Region, Technology, Availability ---
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        if (region, technology) not in self.defined_tech:
+            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+        if isinstance(resource_availability, dict):
+            for y, val in resource_availability.items():
+                if not (0 <= val <= 1):
+                    raise ValueError(f"Resource availability for year {y} must be in [0, 1].")
+        elif isinstance(resource_availability, (int, float)):
+            if not (0 <= resource_availability <= 1):
+                raise ValueError("Resource availability must be in [0, 1].")
+        self.defined_tech.add((region, technology))
+        self.defined_fuels.add(output_fuel)
+
+        # Map year to resource availability factor
+        if resource_availability is None:
+            avail_map = {y: 1.0 for y in self.years}
+        elif isinstance(resource_availability, dict):
+            avail_map = {y: resource_availability.get(y, list(resource_availability.values())[0]) for y in self.years}
+        else:
+            avail_map = {y: resource_availability for y in self.years}
+
+        # Output activity ratios always 1.0 for resource technologies
+        output_records = []
+        for y in self.years:
+            output_records.append({"REGION": region, "TECHNOLOGY": technology, "FUEL": output_fuel, "MODE_OF_OPERATION": 'MODE1', "YEAR": y, "VALUE": 1.0})
+        self.output_activity_ratio = self.add_to_dataframe(self.output_activity_ratio, output_records,
+                                                           key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
+        self.defined_fuels.add(output_fuel)
+
+        # Availability factor
+        avail_records = []
+        for y in self.years:
+            avail_records.append({"REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": avail_map[y]})
+        self.availability_factor = self.add_to_dataframe(self.availability_factor, avail_records,
+                                                         key_columns=["REGION", "TECHNOLOGY", "YEAR"])
 
     def set_capacity_factor(self, region, technology, year=None,
-                           timeslice_factor=None, season_factor=None, 
-                           day_factor=None, time_factor=None):
+                            timeslice_factor=None, season_factor=None, 
+                            day_factor=None, time_factor=None):
         """
         Set capacity factor profile for a technology across timeslices.
         Capacity factor represents the fraction of installed capacity that can operate.
-        Supports direct timeslice factors or hierarchical (season, day, hour) factors.
-        
+        Supports direct timeslice factors or hierarchical (season, day, time) factors.
+        Factor dictionaries should map timeslice/season/daytype/dailytimebracket names to their respective factors.
+        If both timeslice factors and hierarchical factors are provided, timeslice factors take precedence.
+        If multiple factor dictionaries are provided, hierarchical weighting is used.
+        Missing entries default to 1.0, i.e. no adjustment.
+
         :param region: str, Region where technology operates
         :param technology: str, Technology identifier
         :param year: int, list[int], or None. If None, applies to all years
@@ -296,18 +437,50 @@ class SupplyComponent(ScenarioComponent):
         Example::
             # Solar PV with time-of-day variation
             supply.set_capacity_factor('Region1', 'SOLAR_PV', 
-                                      time_factor={'Morning': 0.3, 'Midday': 1.0, 'Evening': 0.2, 'Night': 0.0})
+                                       time_factor={'Morning': 0.3, 'Midday': 1.0, 'Evening': 0.2, 'Night': 0.0})
             
             # Wind with seasonal variation
             supply.set_capacity_factor('Region1', 'WIND_OFFSHORE',
-                                      season_factor={'Winter': 1.2, 'Spring': 0.9, 'Summer': 0.7, 'Fall': 1.1})
+                                       season_factor={'Winter': 1.2, 'Spring': 0.9, 'Summer': 0.7, 'Fall': 1.1})
             
             # Combined seasonal and time-of-day
             supply.set_capacity_factor('Region1', 'WIND_ONSHORE',
-                                      season_factor={'Winter': 1.1, 'Summer': 0.9},
-                                      time_factor={'Day': 1.05, 'Night': 0.95})
+                                       season_factor={'Winter': 1.1, 'Summer': 0.9},
+                                       time_factor={'Day': 1.05, 'Night': 0.95})
         """
-        pass
+        # --- VALIDATION: Region, Technology, Year ---
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        if (region, technology) not in self.defined_tech:
+            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+        self.defined_tech.add((region, technology))
+        if isinstance(year, int) and year not in self.years:
+            raise ValueError(f"Year {year} not defined in scenario years.")
+        if isinstance(year, list) and not all(y in self.years for y in year):
+            raise ValueError(f"One or more years in {year} not defined in scenario years.")
+        
+        if isinstance(year, int):
+            years = [year]
+        elif isinstance(year, list):
+            years = year
+        else:
+            years = [self.years[0]]
+
+        for y in years:
+            # Create comprehensive timeslice factor dict
+            if timeslice_factor is not None:
+                timeslice_factor = self._apply_timeslice_factors(timeslice_factor, default=1.0)
+            elif any(f is not None for f in [season_factor, day_factor, time_factor]):
+                timeslice_factor = self._apply_hierarchical_factors(
+                    season_factor or {}, day_factor or {}, time_factor or {}, default=1.0
+                )
+            else: # Default to 1.0 for all timeslices
+                timeslice_factor = self._apply_timeslice_factors({}, default=1.0)
+            self.capacity_factor_assignments[(region, technology, y)] = {"type": "custom", "weights": timeslice_factor}
+        # Apply to all years if year is None
+        if year is None:
+            for y in self.years[1:]:
+                self.capacity_factor_assignments[(region, technology, y)] = self.capacity_factor_assignments[(region, technology, years[0])]
 
     def set_availability_factor(self, region, technology, availability, year=None):
         """
@@ -329,12 +502,48 @@ class SupplyComponent(ScenarioComponent):
             supply.set_availability_factor('Region1', 'COAL_PP',
                                           availability={2020: 0.85, 2030: 0.88, 2040: 0.90})
         """
-        pass
+        # --- VALIDATION: Region, Technology, Year, Availability ---
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        if (region, technology) not in self.defined_tech:
+            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+        self.defined_tech.add((region, technology))
+        if isinstance(year, int) and year not in self.years:
+            raise ValueError(f"Year {year} not defined in scenario years.")
+        if isinstance(year, list) and not all(y in self.years for y in year):
+            raise ValueError(f"One or more years in {year} not defined in scenario years.")
+        if isinstance(availability, dict):
+            for y, val in availability.items():
+                if not (0 <= val <= 1):
+                    raise ValueError(f"Resource availability for year {y} must be in [0, 1].")
+        elif isinstance(availability, (int, float)):
+            if not (0 <= availability <= 1):
+                raise ValueError("Resource availability must be in [0, 1].")
 
-    def set_residual_capacity(self, region, technology, capacity_trajectory,
-                            interpolation='step', retirement_profile=None):
+        if isinstance(year, int):
+            years = [year]
+        elif isinstance(year, list):
+            years = year
+        else:
+            years = self.years
+
+        # Map year to availability factor
+        if isinstance(availability, dict):
+            avail_map = {y: availability.get(y, list(availability.values())[0]) for y in years}
+        else:
+            avail_map = {y: availability for y in years}
+
+        # Availability factor
+        records = []
+        for y in years:
+            records.append({"REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": avail_map[y]})
+        self.availability_factor = self.add_to_dataframe(self.availability_factor, records,
+                                                            key_columns=["REGION", "TECHNOLOGY", "YEAR"])
+        
+    def set_residual_capacity(self, region, technology, capacity_trajectory: dict,
+                              interpolation='step', retirement_profile=None):
         """
-        Define existing/legacy capacity for a technology (capacity built before model start).
+        Define existing/legacy capacity for a given region and technology (capacity built before model start) over specified model years.
         
         :param region: str, Region where capacity exists
         :param technology: str, Technology identifier
@@ -354,10 +563,47 @@ class SupplyComponent(ScenarioComponent):
                                         capacity_trajectory={2020: 10, 2030: 10, 2040: 5},
                                         retirement_profile={2035: 0.5})  # 50% retire in 2035
         """
-        pass
+        # --- VALIDATION: Region, Technology, Trajectory, Interpolation ---
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        if (region, technology) not in self.defined_tech:
+            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+        self.defined_tech.add((region, technology))
+        if len(capacity_trajectory) == 0:
+            raise ValueError(f"No capacity trajectory points provided for {region}-{technology}.")
+        for y, val in capacity_trajectory.items():
+            if val < 0:
+                raise ValueError(f"Residual capacity cannot be negative. Found {val} in model year {y} for {region}-{technology}.")
+        if interpolation not in ['step', 'linear']:
+            print(f"Interpolation method '{interpolation}' for {region}-{technology} not recognized. Using 'step' instead.")
+            interpolation = 'step'
+        if retirement_profile is not None:
+            if not isinstance(retirement_profile, dict):
+                raise ValueError("retirement_profile must be a dict {year: retirement_fraction}.")
+            for y, frac in retirement_profile.items():
+                if not (0 <= frac <= 1):
+                    raise ValueError(f"Retirement fraction for year {y} must be in [0, 1].")
 
+        # Interpolate
+        records = []
+        sorted_years = sorted(capacity_trajectory.keys())
+        for i in range(len(sorted_years) - 1):
+            y_start, y_end = sorted_years[i], sorted_years[i+1]
+            years_to_fill = [y for y in self.years if y_start <= y < y_end]
+            val_start, val_end = capacity_trajectory[y_start], capacity_trajectory[y_end]
+            
+            if interpolation == 'linear':
+                values = np.linspace(val_start, val_end, len(years_to_fill) + 1)[:-1]
+            else: # Step
+                values = [val_start] * len(years_to_fill)
+
+            for y, val in zip(years_to_fill, values):
+                records.append({"REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": val})
+        # YOU ARE HERE
+        # TODO: How does retirement_profile affect this?
+        
     def set_emission_activity(self, region, technology, emission, rate, 
-                             mode='MODE1', year=None):
+                              mode='MODE1', year=None):
         """
         Define emission rate per unit of activity for a technology.
         
@@ -421,7 +667,7 @@ class SupplyComponent(ScenarioComponent):
         pass
 
     def copy_technology(self, source_region, source_technology, 
-                       target_region, target_technology, scale_factor=1.0):
+                        target_region, target_technology, scale_factor=1.0):
         """
         Copy all parameters from one technology to another (useful for similar technologies).
         
@@ -456,20 +702,6 @@ class SupplyComponent(ScenarioComponent):
         pass
 
     # === Internal Logic Helpers ===
-    def _validate_technology_exists(self, region, technology):
-        """
-        Check if technology has been registered via add_technology().
-        Raises descriptive error if not found.
-        """
-        pass
-
-    def _validate_fuel_exists(self, fuel):
-        """
-        Check if fuel has been defined (either in topology or via activity ratios).
-        Raises descriptive error if fuel is unknown.
-        """
-        pass
-
     def _apply_efficiency_to_ratios(self, efficiency, mode='MODE1'):
         """
         Convert efficiency value to input/output activity ratios.
@@ -481,7 +713,54 @@ class SupplyComponent(ScenarioComponent):
         :param mode: str, Mode identifier
         :return: tuple (input_ratio, output_ratio)
         """
-        pass
+        if not (0 < efficiency <= 1):
+            raise ValueError(f"Efficiency must be in (0, 1], got {efficiency}.")
+        input_ratio = 1.0 / efficiency
+        output_ratio = 1.0
+        return input_ratio, output_ratio
+    
+    def _apply_timeslice_factors(self, factor_dict, default=1.0):
+        """
+        Applies timeslice factors.
+        If a timeslice is missing in factor_dict, it uses the default.
+        If a timeslice is present, it uses the provided factor.
+        Returns a complete dict of timeslice factors.
+        """
+        result = {}
+        for ts in self.time_axis["TIMESLICE"]:
+            val = factor_dict.get(ts, 1.0)
+            if not 0 <= val <= 1:
+                raise ValueError(f"Capacity factor for timeslice '{ts}' must be in [0,1], got {val}.")
+            result[ts] = val
+        return result
+    
+    def _apply_hierarchical_factors(self, season_factor, day_factor, time_factor, default=1.0):
+        """
+        Applies hierarchical factors to generate timeslice factors.
+        If a season/day/time is missing in the respective factor dict, it uses the default.
+        If a season/day/time is present, it uses the provided factor.
+        Returns a complete dict of timeslice factors.
+        """
+        # Compute adjusted factors for each dimension
+        s_adj = {}
+        for season in self.time_axis["SEASON"].unique():
+            s_adj[season] = season_factor.get(season, 1.0)
+        d_adj = {}
+        for day in self.time_axis["DAYTYPE"].unique():
+            d_adj[day] = day_factor.get(day, 1.0)
+        t_adj = {}
+        for time in self.time_axis["DAILYTIMEBRACKET"].unique():
+            t_adj[time] = time_factor.get(time, 1.0)
+        
+        result = {}
+        for _, ts_row in self.time_axis.iterrows():
+            ts = ts_row["TIMESLICE"]
+            s, d, t = ts_row["SEASON"], ts_row["DAYTYPE"], ts_row["DAILYTIMEBRACKET"]
+            val = s_adj[s] * d_adj[d] * t_adj[t]
+            if not 0 <= val <= 1:
+                raise ValueError(f"Capacity factor for timeslice '{ts}' must be in [0,1], got {val}.")
+            result[ts] = val
+        return result
 
     def _interpolate_capacity_trajectory(self, trajectory, years, method='step'):
         """
@@ -491,29 +770,6 @@ class SupplyComponent(ScenarioComponent):
         :param years: list, All model years
         :param method: str, 'step', 'linear', or 'retire'
         :return: dict, {year: value} for all years
-        """
-        pass
-
-    def _apply_capacity_factor_hierarchical(self, season_factor, day_factor, time_factor, year):
-        """
-        Apply hierarchical factors (season/day/time) to generate timeslice-specific capacity factors.
-        Similar logic to demand profile generation but for capacity availability.
-        
-        :param season_factor: dict or None
-        :param day_factor: dict or None
-        :param time_factor: dict or None
-        :param year: int
-        :return: dict, {timeslice: capacity_factor}
-        """
-        pass
-
-    def _apply_capacity_factor_timeslice(self, timeslice_factor, year):
-        """
-        Apply direct timeslice capacity factors.
-        
-        :param timeslice_factor: dict, {timeslice: factor}
-        :param year: int
-        :return: dict, {timeslice: capacity_factor}
         """
         pass
 
@@ -532,24 +788,22 @@ class SupplyComponent(ScenarioComponent):
         - Ratios are positive
         - At least one output fuel is specified
         """
-        pass
-
-    def _expand_year_specification(self, year):
-        """
-        Convert year specification to list of years.
-        - If None: returns all model years
-        - If int: returns [year]
-        - If list: returns list as-is
-        Validates all years are in model year range.
-        """
-        pass
-
-    def _merge_activity_ratios(self, existing_df, new_records):
-        """
-        Merge new activity ratio records into existing DataFrame.
-        Handles duplicates by overwriting with new values.
-        """
-        pass
+        if not isinstance(modes_config, dict):
+            raise ValueError("modes_config must be a dictionary of mode configurations.")
+        for mode, config in modes_config.items():
+            if not isinstance(config, dict):
+                raise ValueError(f"Configuration for mode '{mode}' must be a dictionary.")
+            if 'inputs' not in config or 'outputs' not in config:
+                raise ValueError(f"Mode '{mode}' must have both 'inputs' and 'outputs' keys.")
+            if not isinstance(config['inputs'], dict) or not isinstance(config['outputs'], dict):
+                raise ValueError(f"'inputs' and 'outputs' for mode '{mode}' must be dictionaries.")
+            # At least one output fuel
+            if not config['outputs']:
+                raise ValueError(f"Mode '{mode}' must specify at least one output fuel.")
+            # All ratios must be positive
+            for fuel, ratio in list(config['inputs'].items()) + list(config['outputs'].items()):
+                if not (isinstance(ratio, (int, float)) and ratio > 0):
+                    raise ValueError(f"Ratio for fuel '{fuel}' in mode '{mode}' must be a positive number.")
 
     def _compute_mode_activity_distribution(self, region, technology, modes):
         """
@@ -564,13 +818,6 @@ class SupplyComponent(ScenarioComponent):
         - Every technology has at least one output
         - Technologies with inputs also have outputs (except demand/sink technologies)
         - Modes are consistently defined across input/output ratios
-        """
-        pass
-
-    def _normalize_capacity_factors(self, capacity_factor_rows):
-        """
-        Ensure capacity factors are between 0 and 1.
-        Log warnings for any suspicious values.
         """
         pass
 

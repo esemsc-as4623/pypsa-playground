@@ -29,9 +29,14 @@ pyoscomp/
 
 [] OS-agnostic path handling
     - use `os.path.join(self.scenario_dir, filename)`
+[] Modularize prerequisite checks
+    - each component class has its own prerequisite check as static method
+    - use this to check prerequisite files for all components with dependencies
+[] Modularize input validation checks in base.py or elsewhere to minimize repeated code?
+    - establish basic rules, e.g. data type, non-negative, etc that are used commonly
+    - add specific input validation checks within relevant functions
+[] Put functions and interpolations in `scenario/rules`
+[] Add extrapolation for before first trajectory point and after last trajectory point
 [] Enum + error handling to enforce valid choices
 [] Dataclasses or NamedTuples
     - to store profile configuration
-[] Case sensitive matching
-    - season, daytype, dailytimebracket
-    - validate keys during `process` phase

@@ -15,15 +15,19 @@ class ScenarioComponent(ABC):
     def write_dataframe(self, filename: str, df: pd.DataFrame):
         """
         Writes a pandas DataFrame to a CSV in the scenario directory.
-        Used for Parameters (e.g. Conversionls, YearSplit from OSeMOSYS).
+        :param filename: Name of the CSV file
+        :param df: DataFrame to write
         """
         file_path = os.path.join(self.scenario_dir, filename)
         df.to_csv(file_path, index=False)
 
-    def read_csv(self, filename, expected_columns=[]):
+    def read_csv(self, filename, expected_columns=[]) -> pd.DataFrame:
         """
         Helper to read a CSV file and validate columns.
         Returns DataFrame. Raises informative error if file missing or columns mismatch.
+        :param filename: Name of the CSV file
+        :param expected_columns: List of expected column names
+        :return: DataFrame with CSV contents
         """
         path = os.path.join(self.scenario_dir, filename)
         if not os.path.exists(path):
@@ -34,6 +38,31 @@ class ScenarioComponent(ABC):
             if missing:
                 raise ValueError(f"File '{filename}' is missing columns: {missing}. Found columns: {list(df.columns)}")
         return df
+    
+    def add_to_dataframe(self, existing_df: pd.DataFrame, new_records: list,
+                         key_columns: list, keep='last') -> pd.DataFrame:
+        """
+        Append new records to an existing DataFrame.
+        :param existing_df: Existing DataFrame
+        :param new_records: List of dicts representing new records
+        :param key_columns: Columns to identify duplicates
+        :param keep: Which duplicate to keep ('first' or 'last')
+        :return: Merged DataFrame
+        """
+        for col in key_columns:
+            if col not in existing_df.columns and not existing_df.empty:
+                raise ValueError(f"Key column '{col}' not found in existing DataFrame.")
+        if keep not in ['first', 'last']:
+            raise ValueError("Parameter 'keep' must be either 'first' or 'last'.")
+        
+        df_new = pd.DataFrame(new_records)
+        if existing_df.empty:
+            return df_new
+        else:
+            combined = pd.concat([existing_df, df_new], ignore_index=True)
+            # Drop duplicates based on all key columns, keep last (newest)
+            merged_df = combined.drop_duplicates(subset=key_columns, keep=keep).reset_index(drop=True)
+            return merged_df
     
     @staticmethod
     def copy(source_scenario, target_scenario, overwrite=False):

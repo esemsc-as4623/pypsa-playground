@@ -150,18 +150,15 @@ class DemandComponent(ScenarioComponent):
             demand.add_annual_demand('Region1', 'ELEC',
             trajectory={2020: 100, 2030: 120}, trend_function=compound)
         """
+        # --- VALIDATION: Region, Trajectory, Interpolation
         if region not in self.regions:
             raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
         self.defined_fuels.add((region, fuel))
-
-        # --- VALIDATION: Trajectory Provided, Non-negative ---
         if len(trajectory) == 0:
             raise ValueError(f"No trajectory points provided for {region}-{fuel}.")
         for y, val in trajectory.items():
             if val < 0:
                 raise ValueError(f"Demand cannot be negative. Found {val} in model year {y} for {region}-{fuel}")
-            
-        # --- VALIDATION: Interpolation ---
         if interpolation not in ['step', 'linear', 'cagr']:
             print(f"Interpolation method '{interpolation}' for {region}-{fuel} not recognized. Using 'step' instead.") 
             interpolation = 'step'
@@ -173,7 +170,7 @@ class DemandComponent(ScenarioComponent):
                 val = trajectory.get(y, trend_function(y))
                 if val < 0:
                     raise ValueError(f"Trend function produced negative demand for {region}-{fuel} in model year {y}: {val}")
-                records.append({"REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": round(val, 4)})
+                records.append({"REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": val})
         
         # --- PATH B: Interpolation Based ---
         else:
@@ -183,14 +180,12 @@ class DemandComponent(ScenarioComponent):
             
             # Interpolate
             for i in range(len(sorted_years) - 1):
-                y_start = sorted_years[i]
-                y_end = sorted_years[i+1]
+                y_start, y_end = sorted_years[i], sorted_years[i+1]
                 years_to_fill = [y for y in self.years if y_start <= y < y_end]
-                val_start = trajectory[y_start]
-                val_end = trajectory[y_end]
+                val_start, val_end = trajectory[y_start], trajectory[y_end]
                 
-                if interpolation == 'step':
-                    values = [val_start] * len(years_to_fill)
+                if interpolation == 'linear':
+                    values = np.linspace(val_start, val_end, len(years_to_fill) + 1)[:-1]
                 elif interpolation == 'cagr':
                     if val_start == 0:
                          # Handle 0 start for CAGR (mathematically undefined, fallback to linear or 0)
@@ -199,19 +194,19 @@ class DemandComponent(ScenarioComponent):
                         steps = y_end - y_start
                         r = (val_end / val_start) ** (1 / steps) - 1
                         values = [val_start * ((1 + r) ** (y - y_start)) for y in years_to_fill]
-                else: # Linear
-                    values = np.linspace(val_start, val_end, len(years_to_fill) + 1)[:-1]
-
+                else: # Step
+                    values = [val_start] * len(years_to_fill)
+                    
                 for y, val in zip(years_to_fill, values):
                     records.append({
-                        "REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": round(val, 4)
+                        "REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": val
                     })
 
             # Final Point
             last_yr = sorted_years[-1]
             last_val = trajectory[last_yr]
             records.append({
-                "REGION": region, "FUEL": fuel, "YEAR": last_yr, "VALUE": round(last_val, 4)
+                "REGION": region, "FUEL": fuel, "YEAR": last_yr, "VALUE": last_val
             })
 
             # Extrapolate if needed
@@ -242,21 +237,11 @@ class DemandComponent(ScenarioComponent):
                     # Validate extrapolation didn't go negative
                     if val < 0:
                         val = 0
-                    records.append({"REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": round(val, 4)})
+                    records.append({"REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": val})
         
-        # Append to DataFrame
-        if not records:
-            return
-        df_new = pd.DataFrame(records)
-
-        if self.annual_demand_df.empty:
-            self.annual_demand_df = df_new
-        else:
-            # Merge on REGION, FUEL, YEAR, giving priority to new data
-            combined = pd.concat([self.annual_demand_df, df_new], ignore_index=True)
-            # Keep the last occurrence (i.e., new data overwrites old)
-            self.annual_demand_df = combined.drop_duplicates(subset=["REGION", "FUEL", "YEAR"], keep="last").reset_index(drop=True)
-
+        self.annual_demand_df = self.add_to_dataframe(self.annual_demand_df, records,
+                                                      key_columns=["REGION", "FUEL", "YEAR"])
+        
     def add_flexible_demand(self, region, fuel, year, value):
         """
         Add a flexible (accumulated) demand entry for a given region, fuel, and year.
@@ -271,24 +256,17 @@ class DemandComponent(ScenarioComponent):
         """
         if value < 0:
             raise ValueError(f"Flexible demand cannot be negative: {value} for {region}-{fuel} in year {year}")
-
-        df_new = pd.DataFrame([{"REGION": region, "FUEL": fuel, "YEAR": year, "VALUE": value}])
-
-        if self.accumulated_demand_df.empty:
-            self.accumulated_demand_df = df_new
-        else:
-            # Merge on REGION, FUEL, YEAR, giving priority to new data
-            combined = pd.concat([self.accumulated_demand_df, df_new], ignore_index=True)
-            # Keep the last occurrence (i.e., new data overwrites old)
-            self.accumulated_demand_df = combined.drop_duplicates(subset=["REGION", "FUEL", "YEAR"], keep="last").reset_index(drop=True)
+        record = [{"REGION": region, "FUEL": fuel, "YEAR": year, "VALUE": value}]
+        self.accumulated_demand_df = self.add_to_dataframe(self.accumulated_demand_df, record,
+                                                           key_columns=["REGION", "FUEL", "YEAR"])
 
     def set_subannual_profile(self, region, fuel, year=None, timeslice_factor=None, 
                               season_factor=None, day_factor=None, time_factor=None):
         """
         Set the demand profile for a given region, fuel, and optionally year.
-        Supports direct timeslice factors or hierarchical (season, day, hour) factors.
+        Supports direct timeslice factors or hierarchical (season, day, time) factors.
         Factor dictionaries should map timeslice/season/daytype/dailytimebracket names to their respective factors.
-        If both timeslice factors and is provided, it takes precendence.
+        If both timeslice factors and hierarchical factors are provided, timeslice factors take precedence.
         If multiple factor dictionaries are provided, hierarchical weighting is used.
         Missing entries default to YearSplit.csv values, i.e. the proportion of the year that a timeslice represents.
 
@@ -307,6 +285,8 @@ class DemandComponent(ScenarioComponent):
         # --- VALIDATION: Region, Fuel, Year ---
         if region not in self.regions:
             raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+        if (region, fuel) not in self.defined_fuels:
+            raise ValueError(f"Fuel '{fuel}' not registered in region '{region}'. Call add_annual_demand() first.")
         self.defined_fuels.add((region, fuel))
         if isinstance(year, int) and year not in self.years:
             raise ValueError(f"Year {year} not defined in scenario years.")
@@ -315,16 +295,16 @@ class DemandComponent(ScenarioComponent):
         
         if isinstance(year, int):
             years = [year]
-        if isinstance(year, list):
+        elif isinstance(year, list):
             years = year
-        if year is None:
+        else:
             years = [self.years[0]]
         
         for y in years:
             # Create comprehensive timeslice factor dict
-            if timeslice_factor:
+            if timeslice_factor is not None:
                 timeslice_factor = self._apply_timeslice_factors(timeslice_factor, y)
-            elif season_factor or day_factor or time_factor:
+            elif any(f is not None for f in [season_factor, day_factor, time_factor]):
                 timeslice_factor = self._apply_hierarchical_factors(
                     season_factor or {}, day_factor or {}, time_factor or {}, y
                 )
@@ -379,11 +359,11 @@ class DemandComponent(ScenarioComponent):
             result[ts] = original * factor_dict.get(ts, 1)
         return result
     
-    def _apply_hierarchical_factors(self, season_factor, day_factor, hour_factor, year):
+    def _apply_hierarchical_factors(self, season_factor, day_factor, time_factor, year):
         """
         Applies hierarchical factors to generate timeslice factors.
-        If a season/day/hour is missing in the respective factor dict, it uses the original YearSplit proportion.
-        If a season/day/hour is present, it multiplies the original YearSplit proportion by the provided factor.
+        If a season/day/time is missing in the respective factor dict, it uses the original YearSplit proportion.
+        If a season/day/time is present, it multiplies the original YearSplit proportion by the provided factor.
         Returns a complete dict of timeslice factors.
         """
         # Compute adjusted factors for each dimension
@@ -395,16 +375,16 @@ class DemandComponent(ScenarioComponent):
         for day in self.time_axis["DayType"].unique():
             original = self.time_axis.loc[(self.time_axis["YEAR"] == year) & (self.time_axis["DayType"] == day), "VALUE"].sum()
             d_adj[day] = original * day_factor.get(day, 1)
-        h_adj = {}
-        for hour in self.time_axis["DailyTimeBracket"].unique():
-            original = self.time_axis.loc[(self.time_axis["YEAR"] == year) & (self.time_axis["DailyTimeBracket"] == hour), "VALUE"].sum()
-            h_adj[hour] = original * hour_factor.get(hour, 1)
+        t_adj = {}
+        for time in self.time_axis["DailyTimeBracket"].unique():
+            original = self.time_axis.loc[(self.time_axis["YEAR"] == year) & (self.time_axis["DailyTimeBracket"] == time), "VALUE"].sum()
+            t_adj[time] = original * time_factor.get(time, 1)
 
         result = {}
         for _, ts_row in self.time_axis.iterrows():
             ts = ts_row["TIMESLICE"]
-            s, d, h = ts_row["Season"], ts_row["DayType"], ts_row["DailyTimeBracket"]
-            result[ts] = s_adj[s] * d_adj[d] * h_adj[h]
+            s, d, t = ts_row["Season"], ts_row["DayType"], ts_row["DailyTimeBracket"]
+            result[ts] = s_adj[s] * d_adj[d] * t_adj[t]
         return result
         
 
