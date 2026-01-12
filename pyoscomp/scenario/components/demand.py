@@ -545,7 +545,7 @@ class DemandComponent(ScenarioComponent):
         # --- Styles ---
         CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00'][::-2]
         plt.rcParams.update({
-            'font.size': 20, 
+            'font.size': 14, 
             'text.color': 'black',
             'axes.labelcolor': 'black',
             'xtick.color': 'black',
@@ -631,6 +631,6 @@ class DemandComponent(ScenarioComponent):
         # Add a global legend for all fuels at the top
         if handles:
             fig.legend(handles, fuels, loc='upper center', bbox_to_anchor=(0.5, 1.05),
-                       ncol=min(len(fuels), 5), title="Fuel", prop={'size': 20}, title_fontsize=22)
+                       ncol=min(len(fuels), 5), prop={'size': 20})
         plt.tight_layout()
         plt.show()
