@@ -897,7 +897,7 @@ class SupplyComponent(ScenarioComponent):
         import matplotlib.patches as mpatches
         
         # --- Styles ---
-        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00']
+        COLOR = ['darkslategrey']
         HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
         plt.rcParams.update({
             'font.size': 14,
@@ -912,16 +912,24 @@ class SupplyComponent(ScenarioComponent):
         self.load()
         df_operation = self.operational_life.copy()
         df_fuel = self.output_activity_ratio.copy()
+        df_availability = self.availability_factor.copy()
 
         regions = sorted(df_operation['REGION'].unique())
         all_technologies = sorted(df_operation['TECHNOLOGY'].unique())
         output_fuels = sorted(df_fuel['FUEL'].unique())
         n_regions = len(regions)
 
-        # Assign a color map
-        region_color_map = {region: CB_PALETTE[i % len(CB_PALETTE)] for i, region in enumerate(regions)}
+        # Assign style map
         fuel_hatch_map = {fuel: HATCHES[i % len(HATCHES)] for i, fuel in enumerate(output_fuels)}
-
+        opacity_levels = [
+            (0.95, 1.0, '95-100%'), (0.9, 0.8, '90-95%'), (0.75, 0.6, '75-90%'),
+            (0.5, 0.4, '50-75%'), (0.25, 0.2, '25-50%'), (0.0, 0.05, '0-25%')
+        ]
+        def _get_opacity(availability):
+            for thresh, alpha, _ in opacity_levels:
+                if availability >= thresh:
+                    return alpha
+        
         ncols, nrows = 1, n_regions
 
         # --- Plotting ---
@@ -947,15 +955,15 @@ class SupplyComponent(ScenarioComponent):
             ax.set_yticks(list(tech_y_map.values()))
             ax.set_yticklabels(all_technologies)
             ax.set_ylim(y_limit_bottom, y_limit_top)
-            ax.invert_yaxis()  # Put the first tech at the top
+            ax.invert_yaxis()
 
             for tech in all_technologies:
                 y_pos = tech_y_map[tech]
 
                 op_life_row = region_op_life[region_op_life['TECHNOLOGY'] == tech]
                 tech_outputs = region_outputs[region_outputs['TECHNOLOGY'] == tech]
+                region_availability = df_availability[df_availability['REGION'] == region]
 
-                # Only plot if data exists for this specific region-tech combo
                 if not op_life_row.empty and not tech_outputs.empty:
                     op_life = int(op_life_row['VALUE'].iloc[0])
                     start_year = min(self.years)
@@ -963,17 +971,28 @@ class SupplyComponent(ScenarioComponent):
 
                     fuel_counts = tech_outputs['FUEL'].value_counts()
                     primary_fuel = fuel_counts.idxmax() if not fuel_counts.empty else output_fuels[0]
+                    last_alpha = _get_opacity(1.0)
 
-                    ax.barh(
-                        y_pos, end_year - start_year + 1, left=start_year, height=bar_height,
-                        color=region_color_map[region], alpha=0.85,
-                        hatch=fuel_hatch_map[primary_fuel],
-                        edgecolor='black', linewidth=0.5
-                    )
+                    for year in range(start_year, end_year + 1):
+                        if year in self.years:
+                            # Get availability for this specific year
+                            avail_row = region_availability[
+                                (region_availability['TECHNOLOGY'] == tech) & 
+                                (region_availability['YEAR'] == year)
+                            ]
+                            availability = avail_row['VALUE'].iloc[0] if not avail_row.empty else 1.0
+                            last_alpha = _get_opacity(availability)
+
+                        ax.barh(
+                            y_pos, width=1, left=year - 0.5, height=bar_height,
+                            color=COLOR[0], alpha=last_alpha, edgecolor='white', linewidth=0.5,
+                            hatch=fuel_hatch_map[primary_fuel]
+                        )
 
             ax.set_title(f"Region: {region}", loc='right')
             ax.grid(axis='x', linestyle='--', alpha=0.4)
-            ax.set_xlim(min(self.years), max(self.years))
+            ax.set_xticks(self.years)
+            ax.set_xlim(min(self.years) - 0.5, max(self.years) + 0.5)
 
             if idx == n_regions - 1:
                 ax.set_xlabel("Year")
@@ -983,15 +1002,28 @@ class SupplyComponent(ScenarioComponent):
             mpatches.Patch(facecolor='white', edgecolor='k', label=fuel, hatch=fuel_hatch_map[fuel])
             for fuel in output_fuels
         ]
-
-        legend = fig.legend(
-            handles=fuel_handles, labels=output_fuels,
+        legend1 = fig.legend(
+            handles=fuel_handles,
+            title="Output Fuel", labels=output_fuels,
             loc='upper center', bbox_to_anchor=(0.5, 0.98),
             ncol=min(len(fuel_handles), 5), frameon=False, handleheight=2.0, handlelength=3.0
         )
+        ax.add_artist(legend1)
+
+        avail_handles = [
+            mpatches.Patch(color=COLOR[0], alpha=alpha, label=label)
+            for _, alpha, label in opacity_levels
+        ]
+        legend2 = fig.legend(
+            handles=avail_handles,
+            title="Availability Factor",
+            loc='upper center', bbox_to_anchor=(0.5, 0.90),
+            ncol=len(avail_handles), frameon=False, handleheight=1.5, handlelength=3.0
+        )
+        ax.add_artist(legend2)
         
         # Adjust layout to prevent overlap with legend
-        plt.tight_layout(rect=[0, 0, 1, 0.94])
+        plt.tight_layout(rect=[0, 0, 1, 0.8])
         plt.show()
         
     def visualize_capacity_mix(self, region, year=None, by_fuel=False, ax=None):
