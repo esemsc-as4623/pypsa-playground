@@ -541,27 +541,25 @@ class SupplyComponent(ScenarioComponent):
                                                             key_columns=["REGION", "TECHNOLOGY", "YEAR"])
         
     def set_residual_capacity(self, region, technology, capacity_trajectory: dict,
-                              interpolation='step', retirement_profile=None):
+                              interpolation='step'):
         """
         Define existing/legacy capacity for a given region and technology (capacity built before model start) over specified model years.
         
         :param region: str, Region where capacity exists
         :param technology: str, Technology identifier
         :param capacity_trajectory: dict, {year: capacity_MW/GW} known capacity points
-        :param interpolation: str, 'step', 'linear', or 'retire' for interpolation between points
-        :param retirement_profile: dict or None, {year: retirement_rate} for gradual retirement
-                                  If None, capacity follows trajectory exactly
+        :param interpolation: str, 'step' or 'linear', for interpolation between points
         
         Example::
             # Existing coal capacity being phased out
             supply.set_residual_capacity('Region1', 'COAL_OLD',
-                                        capacity_trajectory={2020: 15, 2030: 8, 2040: 2, 2050: 0},
-                                        interpolation='linear')
+                                         capacity_trajectory={2020: 15, 2030: 8, 2040: 2, 2050: 0},
+                                         interpolation='linear')
             
             # Nuclear fleet with scheduled retirements
             supply.set_residual_capacity('Region1', 'NUCLEAR_GEN2',
-                                        capacity_trajectory={2020: 10, 2030: 10, 2040: 5},
-                                        retirement_profile={2035: 0.5})  # 50% retire in 2035
+                                         capacity_trajectory={2020: 10, 2030: 10, 2040: 5},
+                                         interpolation='step')
         """
         # --- VALIDATION: Region, Technology, Trajectory, Interpolation ---
         if region not in self.regions:
@@ -577,15 +575,18 @@ class SupplyComponent(ScenarioComponent):
         if interpolation not in ['step', 'linear']:
             print(f"Interpolation method '{interpolation}' for {region}-{technology} not recognized. Using 'step' instead.")
             interpolation = 'step'
-        if retirement_profile is not None:
-            if not isinstance(retirement_profile, dict):
-                raise ValueError("retirement_profile must be a dict {year: retirement_fraction}.")
-            for y, frac in retirement_profile.items():
-                if not (0 <= frac <= 1):
-                    raise ValueError(f"Retirement fraction for year {y} must be in [0, 1].")
 
-        # Interpolate
         records = []
+        # Preceding Years
+        first_yr = sorted_years[0]
+        first_val = capacity_trajectory[first_yr]
+        preceding_years = [y for y in self.years if y < first_yr]
+        for y in preceding_years:
+            records.append({
+                "REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": first_val
+            })
+        
+        # Interpolate
         sorted_years = sorted(capacity_trajectory.keys())
         for i in range(len(sorted_years) - 1):
             y_start, y_end = sorted_years[i], sorted_years[i+1]
@@ -598,48 +599,109 @@ class SupplyComponent(ScenarioComponent):
                 values = [val_start] * len(years_to_fill)
 
             for y, val in zip(years_to_fill, values):
-                records.append({"REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": val})
-        # YOU ARE HERE
-        # TODO: How does retirement_profile affect this?
+                records.append({
+                    "REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": val
+                })
         
-    def set_emission_activity(self, region, technology, emission, rate, 
-                              mode='MODE1', year=None):
-        """
-        Define emission rate per unit of activity for a technology.
-        
-        :param region: str, Region where technology operates
-        :param technology: str, Technology identifier
-        :param emission: str, Emission type (e.g., 'CO2', 'NOx', 'SOx')
-        :param rate: float or dict, Emission per unit activity (e.g., tCO2/PJ)
-                    If float: constant emission rate
-                    If dict: {year: rate} for time-varying rates
-        :param mode: str, Mode of operation (default 'MODE1')
-        :param year: int, list[int], or None. Overrides dict if specified
-        
-        Example::
-            # Coal plant CO2 emissions
-            supply.set_emission_activity('Region1', 'COAL_PP', 'CO2', rate=94.6)  # tCO2/TJ
-            
-            # Gas plant with improving emissions (CCS retrofit)
-            supply.set_emission_activity('Region1', 'GAS_CCGT_CCS', 'CO2',
-                                        rate={2020: 56.1, 2030: 11.2, 2040: 5.6})
-        """
-        pass
+        # Final Point
+        last_yr = sorted_years[-1]
+        last_val = capacity_trajectory[last_yr]
+        if last_yr in self.years:
+            records.append({
+                "REGION": region, "TECHNOLOGY": technology, "YEAR": last_yr, "VALUE": last_val
+            })
 
-    def add_storage_linkage(self, region, technology, storage, mode='MODE1'):
-        """
-        Link a technology to a storage system (for charging/discharging).
+        # Extrapolate if needed
+        remaining_years = [y for y in self.years if y > last_yr]
+        if remaining_years:
+            extrap_values = []
+            if interpolation == 'step':
+                extrap_values = [last_val] * len(remaining_years)
+            elif len(sorted_years) >= 2:
+                prev_yr = sorted_years[-2]
+                prev_val = capacity_trajectory[prev_yr]
+                y_diff = last_yr - prev_yr
+
+                if interpolation == 'linear':
+                    slope = (last_val - prev_val) / y_diff
+                    extrap_values = [last_val + slope * (y - last_yr) for y in remaining_years]
+            else: # Step
+                extrap_values = [last_val] * len(remaining_years)
+
+            for y, val in zip(remaining_years, extrap_values):
+                # Validate extrapolation didn't go negative
+                if val < 0:
+                    val = 0
+                records.append({
+                    "REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": val
+                })
+
+        self.residual_capacity = self.add_to_dataframe(self.residual_capacity, records,
+                                                       key_columns=["REGION", "TECHNOLOGY", "YEAR"])
         
-        :param region: str, Region where linkage exists
-        :param technology: str, Technology identifier (e.g., 'BATTERY_CHARGER', 'BATTERY_DISCHARGER')
-        :param storage: str, Storage system identifier
-        :param mode: str, Mode of operation
+    # def set_emission_activity(self, region, technology, emission, rate, 
+    #                           mode='MODE1', year=None):
+    #     """
+    #     Define emission rate per unit of activity for a technology.
         
-        Example::
-            supply.add_storage_linkage('Region1', 'BATTERY_CHARGE', 'BATTERY_STORAGE')
-            supply.add_storage_linkage('Region1', 'BATTERY_DISCHARGE', 'BATTERY_STORAGE')
-        """
-        pass
+    #     :param region: str, Region where technology operates
+    #     :param technology: str, Technology identifier
+    #     :param emission: str, Emission type (e.g., 'CO2', 'NOx', 'SOx')
+    #     :param rate: float or dict, Emission per unit activity (e.g., tCO2/PJ)
+    #                 If float: constant emission rate
+    #                 If dict: {year: rate} for time-varying rates
+    #     :param mode: str, Mode of operation (default 'MODE1')
+    #     :param year: int, list[int], or None. Overrides dict if specified
+        
+    #     Example::
+    #         # Coal plant CO2 emissions
+    #         supply.set_emission_activity('Region1', 'COAL_PP', 'CO2', rate=94.6)  # tCO2/TJ
+            
+    #         # Gas plant with improving emissions (CCS retrofit)
+    #         supply.set_emission_activity('Region1', 'GAS_CCGT_CCS', 'CO2',
+    #                                     rate={2020: 56.1, 2030: 11.2, 2040: 5.6})
+    #     """
+    #     # --- VALIDATION: Region, Technology, Year, Emission Rate ---
+    #     if region not in self.regions:
+    #         raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
+    #     if (region, technology) not in self.defined_tech:
+    #         raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+    #     self.defined_tech.add((region, technology))
+    #     if isinstance(year, int) and year not in self.years:
+    #         raise ValueError(f"Year {year} not defined in scenario years.")
+    #     if isinstance(year, list) and not all(y in self.years for y in year):
+    #         raise ValueError(f"One or more years in {year} not defined in scenario years.")
+    #     if isinstance(rate, dict):
+    #         for y, val in rate.items():
+    #             if val < 0:
+    #                 raise ValueError(f"Emission rate cannot be negative. Found {val} in year {y}.")
+    #     elif isinstance(rate, (int, float)):
+    #         if rate < 0:
+    #             raise ValueError("Emission rate cannot be negative.")
+    #     else:
+    #         raise ValueError("Emission rate must be a float or dict of {year: value}.")
+        
+    #     if isinstance(year, int):
+    #         years = [year]
+    #     elif isinstance(year, list):
+    #         years = year
+    #     else:
+    #         if isinstance(rate, dict):
+    #             years = sorted(set(rate.keys()) & set(self.years))
+    #         else:
+    #             years = self.years
+        
+    #     # Map year to emission rate
+    #     if isinstance(rate, dict):
+    #         rate_map = {y: rate.get(y, list(rate.values())[0]) for y in years}
+    #     else:
+    #         rate_map = {y: rate for y in years}
+
+    #     records = []
+    #     for y in years:
+    #         records.append({
+    #             "REGION": region, "TECHNOLOGY": technology, "EMISSION": emission, "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": rate_map[y]
+    #         })
 
     def set_operating_constraints(self, region, technology, 
                                   min_utilization=None, ramp_rate=None,
@@ -728,7 +790,7 @@ class SupplyComponent(ScenarioComponent):
         """
         result = {}
         for ts in self.time_axis["TIMESLICE"]:
-            val = factor_dict.get(ts, 1.0)
+            val = factor_dict.get(ts, default)
             if not 0 <= val <= 1:
                 raise ValueError(f"Capacity factor for timeslice '{ts}' must be in [0,1], got {val}.")
             result[ts] = val
@@ -744,13 +806,13 @@ class SupplyComponent(ScenarioComponent):
         # Compute adjusted factors for each dimension
         s_adj = {}
         for season in self.time_axis["SEASON"].unique():
-            s_adj[season] = season_factor.get(season, 1.0)
+            s_adj[season] = season_factor.get(season, default)
         d_adj = {}
         for day in self.time_axis["DAYTYPE"].unique():
-            d_adj[day] = day_factor.get(day, 1.0)
+            d_adj[day] = day_factor.get(day, default)
         t_adj = {}
         for time in self.time_axis["DAILYTIMEBRACKET"].unique():
-            t_adj[time] = time_factor.get(time, 1.0)
+            t_adj[time] = time_factor.get(time, default)
         
         result = {}
         for _, ts_row in self.time_axis.iterrows():
@@ -827,18 +889,6 @@ class SupplyComponent(ScenarioComponent):
         Useful for debugging and validation.
         
         :return: dict with keys for each parameter type
-        """
-        pass
-
-    def _apply_retirement_profile(self, capacity_trajectory, retirement_profile, years):
-        """
-        Apply retirement profile to capacity trajectory.
-        Retirement profile specifies years where capacity is retired.
-        
-        :param capacity_trajectory: dict, {year: capacity}
-        :param retirement_profile: dict, {year: retirement_fraction}
-        :param years: list, All model years
-        :return: dict, {year: adjusted_capacity}
         """
         pass
     

@@ -178,6 +178,15 @@ class DemandComponent(ScenarioComponent):
             if not sorted_years:
                 raise ValueError(f"No trajectory points provided for {region}-{fuel}.")
             
+            # Preceding Years
+            first_yr = sorted_years[0]
+            first_val = trajectory[first_yr]
+            preceding_years = [y for y in self.years if y < first_yr]
+            for y in preceding_years:
+                records.append({
+                    "REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": first_val
+                })
+
             # Interpolate
             for i in range(len(sorted_years) - 1):
                 y_start, y_end = sorted_years[i], sorted_years[i+1]
@@ -205,9 +214,10 @@ class DemandComponent(ScenarioComponent):
             # Final Point
             last_yr = sorted_years[-1]
             last_val = trajectory[last_yr]
-            records.append({
-                "REGION": region, "FUEL": fuel, "YEAR": last_yr, "VALUE": last_val
-            })
+            if last_yr in self.years:
+                records.append({
+                    "REGION": region, "FUEL": fuel, "YEAR": last_yr, "VALUE": last_val
+                })
 
             # Extrapolate if needed
             remaining_years = [y for y in self.years if y > last_yr]
@@ -230,14 +240,16 @@ class DemandComponent(ScenarioComponent):
                     else: # Linear
                         slope = (last_val - prev_val) / y_diff
                         extrap_values = [last_val + slope * (y - last_yr) for y in remaining_years]
-                else:
+                else: # Step
                     extrap_values = [last_val] * len(remaining_years)
 
                 for y, val in zip(remaining_years, extrap_values):
                     # Validate extrapolation didn't go negative
                     if val < 0:
                         val = 0
-                    records.append({"REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": val})
+                    records.append({
+                        "REGION": region, "FUEL": fuel, "YEAR": y, "VALUE": val
+                    })
         
         self.annual_demand_df = self.add_to_dataframe(self.annual_demand_df, records,
                                                       key_columns=["REGION", "FUEL", "YEAR"])
@@ -327,10 +339,8 @@ class DemandComponent(ScenarioComponent):
     # === Processing ===
     def process(self):
         """
-        Generate and update the full demand profile for each (region, fuel, year, timeslice) combination
-        based on self.profile_assignments.
-        Normalizes profiles so that the sum for each (region, fuel, year)
-        is exactly 1.0.
+        Generate and update the full demand profile for each (region, fuel, year, timeslice) combination based on self.profile_assignments.
+        Normalizes profiles so that the sum for each (region, fuel, year) is exactly 1.0.
         Updates self.profile_demand_df with the generated profiles.
         """
         for region, fuel in self.defined_fuels:
