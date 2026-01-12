@@ -2,10 +2,11 @@
 # PyPSA-OSeMOSYS Comparison Framework
 
 ## Overview
-This framework enables direct, reproducible comparison of energy system scenarios using both PyPSA and OSeMOSYS. It provides translation layers, standardized input/output, and a unified CLI for scenario execution, output, and visualization.
+This framework enables direct, reproducible comparison of energy system scenarios using both PyPSA and OSeMOSYS. It provides translation layers, standardized input/output, and a unified CLI for scenario building, execution, output, and visualization.
 
 ## Features
-- Run PyPSA (v1.0.0) and OSeMOSYS (latest, otoole v1.1.5) from a single CLI
+- Run the same* energy system model scenario on PyPSA (v1.0.0) and OSeMOSYS (latest, otoole v1.1.5) from a single set-up
+(* create the logic for the translating the scenario as closely as possible between the two models)
 - Input scenarios via CSV/config folder (no manual scripting)
 - Standardized output CSVs and logs
 - Translation layers for both models (OOP, extensible)
@@ -37,6 +38,7 @@ pyoscomp/
 	 input/         # Input reading
 	 output/        # Output writing
 	 logs/          # Logging
+	 scenario/		# Scenario building
 	 runners/       # Model runners
 	 translation/   # Translation layers
 	 visualization/ # Plotting
@@ -50,10 +52,10 @@ pyoscomp/
 - Document new features in Markdown
 
 ## Developer Guide
-- Follow PEP8 and use docstrings
+- Follow PEP8 and use Sphinx docstrings
 - Add/modify tests for all new code
 - Log all actions and errors
-- Use context7 guides for translation logic
+- Plan feature extensions in `planning.md`
 
 ## License
 MIT

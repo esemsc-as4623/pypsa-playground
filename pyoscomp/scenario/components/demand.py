@@ -559,7 +559,6 @@ class DemandComponent(ScenarioComponent):
             print("No annual demand data to visualize.")
             return
         
-        # Get all unique regions and fuels
         regions = sorted(self.profile_demand_df['REGION'].unique())
         fuels = sorted(self.profile_demand_df['FUEL'].unique())
         n_regions = len(regions)
