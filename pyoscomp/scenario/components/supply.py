@@ -521,8 +521,18 @@ class SupplyComponent(ScenarioComponent):
                 raise ValueError("Resource availability must be in [0, 1].")
 
         # Map year to availability factor
+        # Implicitly uses step interpolation
         if isinstance(availability, dict):
-            avail_map = {y: availability.get(y, list(availability.values())[0]) for y in self.years}
+            avail_years = sorted(availability.keys())
+            avail_map = {}
+            for y in self.years:
+                prev_years = [ay for ay in avail_years if ay <= y]
+                if prev_years:
+                    last_year = max(prev_years)
+                    avail_map[y] = availability[last_year]
+                else:
+                    first_year = min(avail_years)
+                    avail_map[y] = availability[first_year]
         else:
             avail_map = {y: availability for y in self.years}
 
@@ -895,6 +905,7 @@ class SupplyComponent(ScenarioComponent):
         """
         import matplotlib.pyplot as plt
         import matplotlib.patches as mpatches
+        from matplotlib.patches import Circle, Wedge
         
         # --- Styles ---
         COLOR = ['darkslategrey']
@@ -921,23 +932,13 @@ class SupplyComponent(ScenarioComponent):
 
         # Assign style map
         fuel_hatch_map = {fuel: HATCHES[i % len(HATCHES)] for i, fuel in enumerate(output_fuels)}
-        opacity_levels = [
-            (0.95, 1.0, '95-100%'), (0.9, 0.8, '90-95%'), (0.75, 0.6, '75-90%'),
-            (0.5, 0.4, '50-75%'), (0.25, 0.2, '25-50%'), (0.0, 0.05, '0-25%')
-        ]
-        def _get_opacity(availability):
-            for thresh, alpha, _ in opacity_levels:
-                if availability >= thresh:
-                    return alpha
         
         ncols, nrows = 1, n_regions
 
         # --- Plotting ---
-        bar_height = 0.6
-        gap = 0.4 
-        tech_y_map = {tech: i * (bar_height + gap) for i, tech in enumerate(all_technologies)}
-        y_limit_bottom = -gap
-        y_limit_top = len(all_technologies) * (bar_height + gap) - 1.5*gap
+        tech_y_map = {tech: i for i, tech in enumerate(all_technologies)}
+        y_limit_bottom = -0.5
+        y_limit_top = len(all_technologies) - 0.5
 
         fig, axes = plt.subplots(nrows=nrows, ncols=ncols, 
                                 figsize=(12, 1.0 * len(all_technologies) * nrows), 
@@ -971,7 +972,10 @@ class SupplyComponent(ScenarioComponent):
 
                     fuel_counts = tech_outputs['FUEL'].value_counts()
                     primary_fuel = fuel_counts.idxmax() if not fuel_counts.empty else output_fuels[0]
-                    last_alpha = _get_opacity(1.0)
+                    last_availability = 1.0
+
+                    radius = 0.5
+                    center_y = y_pos + radius - 0.5
 
                     for year in range(start_year, end_year + 1):
                         if year in self.years:
@@ -981,18 +985,21 @@ class SupplyComponent(ScenarioComponent):
                                 (region_availability['YEAR'] == year)
                             ]
                             availability = avail_row['VALUE'].iloc[0] if not avail_row.empty else 1.0
-                            last_alpha = _get_opacity(availability)
+                            last_availability = availability
 
-                        ax.barh(
-                            y_pos, width=1, left=year - 0.5, height=bar_height,
-                            color=COLOR[0], alpha=last_alpha, edgecolor='white', linewidth=0.5,
-                            hatch=fuel_hatch_map[primary_fuel]
-                        )
+                        x = year
+                        if last_availability >= 1.0:
+                            patch = Circle((x, center_y), radius, facecolor=COLOR[0], edgecolor='white', linewidth=0.5, hatch=fuel_hatch_map[primary_fuel])
+                        else:
+                            theta2 = 360 * last_availability
+                            patch = Wedge((x, center_y), radius, -90, theta2 - 90, facecolor=COLOR[0], edgecolor='white', linewidth=0.5, hatch=fuel_hatch_map[primary_fuel])
+                        ax.add_patch(patch)
 
             ax.set_title(f"Region: {region}", loc='right')
             ax.grid(axis='x', linestyle='--', alpha=0.4)
             ax.set_xticks(self.years)
             ax.set_xlim(min(self.years) - 0.5, max(self.years) + 0.5)
+            ax.set_aspect('equal')
 
             if idx == n_regions - 1:
                 ax.set_xlabel("Year")
@@ -1002,28 +1009,13 @@ class SupplyComponent(ScenarioComponent):
             mpatches.Patch(facecolor='white', edgecolor='k', label=fuel, hatch=fuel_hatch_map[fuel])
             for fuel in output_fuels
         ]
-        legend1 = fig.legend(
+        fig.legend(
             handles=fuel_handles,
             title="Output Fuel", labels=output_fuels,
             loc='upper center', bbox_to_anchor=(0.5, 0.98),
             ncol=min(len(fuel_handles), 5), frameon=False, handleheight=2.0, handlelength=3.0
         )
-        ax.add_artist(legend1)
-
-        avail_handles = [
-            mpatches.Patch(color=COLOR[0], alpha=alpha, label=label)
-            for _, alpha, label in opacity_levels
-        ]
-        legend2 = fig.legend(
-            handles=avail_handles,
-            title="Availability Factor",
-            loc='upper center', bbox_to_anchor=(0.5, 0.90),
-            ncol=len(avail_handles), frameon=False, handleheight=1.5, handlelength=3.0
-        )
-        ax.add_artist(legend2)
-        
-        # Adjust layout to prevent overlap with legend
-        plt.tight_layout(rect=[0, 0, 1, 0.8])
+        plt.tight_layout()
         plt.show()
         
     def visualize_capacity_mix(self, region, year=None, by_fuel=False, ax=None):

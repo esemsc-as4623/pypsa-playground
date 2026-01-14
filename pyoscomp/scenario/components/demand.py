@@ -541,9 +541,11 @@ class DemandComponent(ScenarioComponent):
         Years are on the x-axis, demand is on the y-axis, and each area represents a fuel.
         """
         import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
 
         # --- Styles ---
-        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00'][::-2]
+        COLOR = ['darkslategrey']
+        HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
         plt.rcParams.update({
             'font.size': 14, 
             'text.color': 'black',
@@ -565,16 +567,15 @@ class DemandComponent(ScenarioComponent):
 
         ncols, nrows = 1, n_regions
 
+        # Assign style map
+        fuel_hatch_map = {fuel: HATCHES[i % len(HATCHES)] for i, fuel in enumerate(fuels)}
+        
         # --- Plotting ---
         fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(12 * ncols, 7 * nrows))
         if n_regions == 1:
             axes = [axes]
         else:
             axes = axes.flatten()
-
-        # Prepare color cycle for all fuels (consistent across regions)
-        fuel_color_map = {fuel: CB_PALETTE[i % len(CB_PALETTE)] for i, fuel in enumerate(fuels)}
-        handles = []
 
         # Track global x/y limits
         global_ys, global_xs = [], []
@@ -604,16 +605,21 @@ class DemandComponent(ScenarioComponent):
 
             # Prepare data for stackplot
             y_arrays = [grouped[fuel].values for fuel in fuel_names]
-            colors = [fuel_color_map[fuel] for fuel in fuel_names]
-            polys = ax.stackplot(years, y_arrays, labels=fuel_names, colors=colors, alpha=0.8)
+            polys = ax.stackplot(years, y_arrays, labels=fuel_names, colors=COLOR[0])
+            # Apply hatches to the stackplot polygons
+            for poly, fuel in zip(polys, fuel_names):
+                poly.set_hatch(fuel_hatch_map[fuel])
+                poly.set_edgecolor('white')
+                poly.set_linewidth(0.5)
             ax.set_title(f"Region: {region}")
             ax.set_ylabel("Total Demand (Model Units)")
             ax.grid(axis='y', linestyle='--', alpha=0.3)
-            # Only collect handles for the first subplot (for global legend)
-            if idx == 0:
-                handles = [plt.Line2D([0], [0], color=fuel_color_map[fuel], lw=6) for fuel in fuel_names]
+            
             global_ys.append(ax.get_ylim())
             global_xs.append(ax.get_xlim())
+
+            if idx == n_regions - 1:
+                ax.set_xlabel("Year")
         
         # --- Formatting ---
         # Set shared axis limits
@@ -624,12 +630,21 @@ class DemandComponent(ScenarioComponent):
         for ax in axes:
             ax.set_ylim(y_min, y_max)
             ax.set_xlim(x_min, x_max)
+        
         # Hide any unused subplots
         for j in range(idx + 1, len(axes)):
             fig.delaxes(axes[j])
+        
         # Add a global legend for all fuels at the top
-        if handles:
-            fig.legend(handles, fuels, loc='upper center', bbox_to_anchor=(0.5, 1.05),
-                       ncol=min(len(fuels), 5), prop={'size': 20})
+        fuel_handles = [
+            mpatches.Patch(facecolor='white', edgecolor='k', label=fuel, hatch=fuel_hatch_map[fuel])
+            for fuel in fuels
+        ]
+        fig.legend(
+            handles=fuel_handles,
+            title="Fuel", labels=fuels,
+            loc='upper center', bbox_to_anchor=(0.5, 1.05),
+            ncol=min(len(fuel_handles), 5), frameon=False, handleheight=2.0, handlelength=3.0
+        )
         plt.tight_layout()
         plt.show()
