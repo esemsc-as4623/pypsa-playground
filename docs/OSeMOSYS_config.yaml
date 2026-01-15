@@ -59,7 +59,7 @@ Conversionls:
     dtype: float
     default: 0
 DAILYTIMEBRACKET:
-    dtype: int
+    dtype: str
     type: set
 DaysInDayType:
     indices: [SEASON,DAYTYPE,YEAR]
@@ -72,7 +72,7 @@ DaySplit:
     dtype: float
     default: 0.00137
 DAYTYPE:
-    dtype: int
+    dtype: str
     type: set
 DepreciationMethod:
     indices: [REGION]
@@ -121,7 +121,7 @@ MinStorageCharge:
     dtype: float
     default: 0
 MODE_OF_OPERATION:
-    dtype: int
+    dtype: str
     type: set
 ModelPeriodEmissionLimit:
     indices: [REGION,EMISSION]
@@ -192,7 +192,7 @@ RETagTechnology:
     dtype: float
     default: 0
 SEASON:
-    dtype: int
+    dtype: str
     type: set
 SpecifiedAnnualDemand:
     indices: [REGION,FUEL,YEAR]

@@ -6,7 +6,7 @@ This document outlines a simple energy system scenario and provides a mapping be
 
 - **Region:** A single region, `REGION1`.
 - **Year:** A single year of analysis, `2025`.
-- **Time Slices:** Two representative time slices: `PEAK` and `OFFPEAK`.
+- **Time Slices:** Two representative time slices: `ALL_SEASONS_ALL_DAYS_PEAK` and `ALL_SEASONS_ALL_DAYS_OFFPEAK`.
 - **Demand:** A demand for electricity (`ELEC`).
 - **Technologies:**
     - `GAS_CCGT`: A baseload combined-cycle gas turbine.
