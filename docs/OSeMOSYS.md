@@ -390,6 +390,14 @@ STORAGE = {
 }
 ```
 
+#### FLEXIBLEDEMANDTYPE
+This set is used to model flexible demand types.
+```
+FLEXIBLEDEMANDTYPE = {
+    FLEX_DEMAND_1
+}
+```
+
 ---
 
 ## Parameters (Input Data)
@@ -648,80 +656,6 @@ ProductionAnnual[r, f, y] ≥
 
 ---
 
-### Typical Technology Performance Parameters
-
-**Important Notes on Sources**:
-- Values represent 2020-2030 timeframe central estimates
-- Actual values vary by location, technology vintage, operating conditions
-- Always verify against local data and recent literature for your study region
-
-| Technology | Operational Life (years) | Availability Factor | Typical Capacity Factor Range | Notes |
-|------------|-------------------------|---------------------|------------------------------|-------|
-| **Coal (Subcritical)** | 40-45 | 0.80-0.87 | 0.45-0.85 | Baseload/mid-merit [1] |
-| **Coal (Supercritical)** | 40-45 | 0.82-0.89 | 0.50-0.85 | Higher efficiency [1] |
-| **Coal with CCS** | 35-40 | 0.75-0.82 | 0.45-0.75 | Energy penalty from capture [2] |
-| **Gas OCGT** | 25-30 | 0.85-0.92 | 0.05-0.30 | Peaking [1] |
-| **Gas CCGT** | 25-30 | 0.85-0.92 | 0.40-0.85 | Mid/baseload [1] |
-| **Gas CCGT with CCS** | 25-30 | 0.80-0.87 | 0.40-0.75 | CCS penalty [2] |
-| **Nuclear (Gen III)** | 60 | 0.83-0.92 | 0.80-0.92 | Baseload [1,3] |
-| **Oil Steam Turbine** | 30-35 | 0.75-0.85 | 0.20-0.60 | Backup/islands [1] |
-| **Hydro (Large/Dam)** | 80-100 | 0.90-0.98 | 0.30-0.70 | Depends on water availability [1] |
-| **Hydro (Run-of-River)** | 60-80 | 0.90-0.95 | 0.20-0.60 | Flow dependent [1] |
-| **Pumped Hydro** | 60-80 | 0.90-0.95 | 0.10-0.30 | Storage [1] |
-| **Biomass Steam** | 25-30 | 0.80-0.90 | 0.50-0.85 | Depends on feedstock [4] |
-| **Geothermal** | 25-30 | 0.85-0.95 | 0.70-0.95 | Baseload [5] |
-| **Solar PV (Utility)** | 25-30 | 0.96-0.99 | 0.10-0.30 | Location dependent [6] |
-| **Solar PV (Rooftop)** | 25-30 | 0.96-0.99 | 0.10-0.30 | Similar to utility [6] |
-| **Concentrated Solar Power** | 25-30 | 0.90-0.95 | 0.20-0.50 | With/without storage [6] |
-| **Wind (Onshore)** | 25-30 | 0.95-0.98 | 0.20-0.45 | Wind resource dependent [7] |
-| **Wind (Offshore)** | 25-30 | 0.93-0.97 | 0.35-0.55 | Better wind resource [7] |
-| **Battery Storage (Li-ion)** | 10-15 | 0.90-0.95 | Dispatch | Storage [8] |
-| **Hydrogen Electrolyzer** | 20-25 | 0.90-0.95 | Variable | Depends on power availability [9] |
-| **Hydrogen Fuel Cell** | 10-15 | 0.85-0.93 | Variable | Emerging [9] |
-
-**Efficiency Values (for Input/Output Ratios)**:
-
-| Technology | Efficiency (HHV) | Input Ratio | Output Ratio | Reference |
-|------------|-----------------|-------------|--------------|-----------|
-| **Coal Subcritical** | 35-38% | 2.63-2.86 | 1.0 | [1] |
-| **Coal Supercritical** | 40-45% | 2.22-2.50 | 1.0 | [1] |
-| **Coal IGCC** | 38-43% | 2.33-2.63 | 1.0 | [1] |
-| **Gas OCGT** | 35-42% | 2.38-2.86 | 1.0 | [1] |
-| **Gas CCGT** | 50-63% | 1.59-2.00 | 1.0 | [1] |
-| **Nuclear** | 33-36% | 2.78-3.03 | 1.0 | [3] |
-| **Hydro** | 85-95% | 1.05-1.18 | 1.0 | [1] |
-| **Biomass Steam** | 25-40% | 2.50-4.00 | 1.0 | [4] |
-| **Geothermal** | 10-20% | 5.0-10.0 | 1.0 | [5] |
-| **Solar PV** | 15-22% (module) | N/A (converts solar resource) | - | [6] |
-| **Wind** | 35-50% (turbine) | N/A (converts wind resource) | - | [7] |
-| **Battery (round-trip)** | 85-95% | 1.05-1.18 | 1.0 | [8] |
-| **Pumped Hydro** | 70-85% | 1.18-1.43 | 1.0 | [1] |
-| **PEM Electrolyzer** | 60-70% | 1.43-1.67 | 1.0 | [9] |
-| **Alkaline Electrolyzer** | 50-70% | 1.43-2.00 | 1.0 | [9] |
-| **Hydrogen Fuel Cell** | 50-65% | 1.54-2.00 | 1.0 | [9] |
-| **Gas Boiler** | 85-95% | 1.05-1.18 | 1.0 | [10] |
-| **Heat Pump (COP)** | 250-450% | 0.22-0.40 | 1.0 | [10] |
-
-**Notes**:
-- HHV = Higher Heating Value basis
-- Input Ratio = 1/Efficiency for fuel consumption
-- For renewable technologies, efficiencies refer to conversion of resource
-- Heat pumps have "efficiency" >100% (COP) as they move rather than convert energy
-
-**Sources**:
-1. IPCC AR5 (2014) - Annex III: Technology-specific Cost and Performance Parameters
-2. IEAGHG (2020) - Towards Zero Emissions CCS in Power Plants
-3. NEA/IEA (2020) - Projected Costs of Generating Electricity 2020
-4. IRENA (2021) - Biomass for Power Generation
-5. IRENA (2021) - Geothermal Power: Technology Brief
-6. NREL (2021) - Annual Technology Baseline; Fraunhofer ISE (2021)
-7. IRENA (2021) - Renewable Power Generation Costs 2020
-8. NREL (2021) - Cost Projections for Utility-Scale Battery Storage
-9. IEA (2021) - The Future of Hydrogen; IRENA (2020) - Green Hydrogen Cost Reduction
-10. IEA (2021) - Energy Efficiency 2021; ASHRAE Handbook
-
----
-
 ### 4. Technology Cost Parameters
 
 #### CapitalCost[r, t, y]
@@ -744,6 +678,101 @@ ProductionAnnual[r, f, y] ≥
 
 ---
 
+### 5. Capacity Constraints Parameters
+
+#### CapacityOfOneTechnologyUnit[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: The capacity of a single unit of a technology. If this is non-zero, new capacity can only be built in discrete units.
+- **Units**: Capacity units (e.g., MW)
+
+#### TotalAnnualMaxCapacity[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: The maximum total capacity allowed for a technology in a given year.
+- **Units**: Capacity units (e.g., MW)
+
+#### TotalAnnualMinCapacity[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: The minimum total capacity required for a technology in a given year.
+- **Units**: Capacity units (e.g., MW)
+
+---
+
+### 6. Investment Constraints Parameters
+
+#### TotalAnnualMaxCapacityInvestment[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: The maximum new capacity that can be invested in for a technology in a given year.
+- **Units**: Capacity units (e.g., MW)
+
+#### TotalAnnualMinCapacityInvestment[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: The minimum new capacity that must be invested in for a technology in a given year.
+- **Units**: Capacity units (e.g., MW)
+
+---
+
+### 7. Activity Constraints Parameters
+
+#### TotalTechnologyAnnualActivityUpperLimit[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: The upper limit on the total annual activity of a technology.
+- **Units**: Activity units (e.g., MWh)
+
+#### TotalTechnologyAnnualActivityLowerLimit[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: The lower limit on the total annual activity of a technology.
+- **Units**: Activity units (e.g., MWh)
+
+#### TotalTechnologyModelPeriodActivityUpperLimit[r, t]
+- **Indices**: r = REGION, t = TECHNOLOGY
+- **Purpose**: The upper limit on the total activity of a technology over the entire model period.
+- **Units**: Activity units (e.g., MWh)
+
+#### TotalTechnologyModelPeriodActivityLowerLimit[r, t]
+- **Indices**: r = REGION, t = TECHNOLOGY
+- **Purpose**: The lower limit on the total activity of a technology over the entire model period.
+- **Units**: Activity units (e.g., MWh)
+
+---
+
+### 8. Reserve Margin Parameters
+
+#### ReserveMarginTagTechnology[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: A binary flag to indicate if a technology contributes to the reserve margin.
+- **Range**: 0 or 1
+
+#### ReserveMarginTagFuel[r, f, y]
+- **Indices**: r = REGION, f = FUEL, y = YEAR
+- **Purpose**: A binary flag to indicate if a fuel's demand is included in the reserve margin calculation.
+- **Range**: 0 or 1
+
+#### ReserveMargin[r, y]
+- **Indices**: r = REGION, y = YEAR
+- **Purpose**: The reserve margin requirement as a fraction of demand.
+- **Range**: 0 to infinity
+
+---
+
+### 9. RE Generation Target Parameters
+
+#### RETagTechnology[r, t, y]
+- **Indices**: r = REGION, t = TECHNOLOGY, y = YEAR
+- **Purpose**: A binary flag to indicate if a technology is considered renewable.
+- **Range**: 0 or 1
+
+#### RETagFuel[r, f, y]
+- **Indices**: r = REGION, f = FUEL, y = YEAR
+- **Purpose**: A binary flag to indicate if a fuel's production is included in the renewable generation target.
+- **Range**: 0 or 1
+
+#### REMinProductionTarget[r, y]
+- **Indices**: r = REGION, y = YEAR
+- **Purpose**: The minimum renewable energy production target as a fraction of total production of the target fuel.
+- **Range**: 0 to 1
+
+---
+
 ### Typical Technology Cost Parameters
 
 **Important Notes**:
@@ -756,7 +785,7 @@ ProductionAnnual[r, f, y] ≥
 | Technology | Capital Cost ($/kW) | Fixed O&M ($/kW/yr) | Variable O&M ($/MWh) | Total LCOE Range ($/MWh) | Notes |
 |------------|-------------------|-------------------|---------------------|------------------------|-------|
 | **Coal (Subcritical)** | 3200-4200 | 35-50 | 3-5 | 60-140 | Fuel cost dominant [1] |
-| **Coal (Supercritical)** | 3500-4800 | 40-55 | 3-5 | 60-140 | More efficient [1] |
+| **Coal (Supercritical)** | 3500-4800 | 40-55 | 3-5 | 60-140 | Higher efficiency [1] |
 | **Coal with CCS** | 5200-7500 | 60-90 | 5-8 | 100-190 | CCS adds 60-80% to cost [2] |
 | **Gas OCGT** | 700-1100 | 8-15 | 3-7 | 150-200 | High fuel cost, low utilization [1] |
 | **Gas CCGT** | 1000-1700 | 12-20 | 2-4 | 50-100 | Mid-merit [1] |
@@ -825,698 +854,3 @@ Add variable O&M: 30 + 3 = 33 $/MWh total
 7. IRENA (2021) - Renewable Power Generation Costs; GWEC (2021) - Global Wind Report
 8. BNEF (2021) - Battery Pack Prices; NREL (2021) - Battery Storage Cost Projections
 9. IEA (2021) - Hydrogen; IRENA (2020) - Green Hydrogen Cost Reduction; Hydrogen Council (2021)
-
----
-
-### 5. Storage Parameters
-
-#### TechnologyToStorage[r, t, s, m]
-- **Indices**: r = REGION, t = TECHNOLOGY, s = STORAGE, m = MODE_OF_OPERATION
-- **Purpose**: Rate at which technology t charges storage s in mode m
-- **Units**: Storage energy units per technology activity unit
-- **Example**: 1.0 = perfect charging efficiency
-
-#### TechnologyFromStorage[r, t, s, m]
-- **Indices**: r = REGION, t = TECHNOLOGY, s = STORAGE, m = MODE_OF_OPERATION
-- **Purpose**: Rate at which technology discharges storage
-- **Units**: Storage units per activity unit
-- **Example**: 0.9 = 90% discharge efficiency
-
-#### StorageLevelStart[r, s]
-- **Indices**: r = REGION, s = STORAGE
-- **Purpose**: Initial storage level at model start
-- **Units**: Energy units (PJ, TWh)
-- **Default**: 0.0000001 (small positive value)
-
-#### StorageMaxChargeRate[r, s]
-- **Indices**: r = REGION, s = STORAGE
-- **Purpose**: Maximum charging rate
-- **Units**: Energy per time period
-- **Default**: 99999 (effectively unlimited)
-
-#### StorageMaxDischargeRate[r, s]
-- **Indices**: r = REGION, s = STORAGE
-- **Purpose**: Maximum discharge rate
-- **Units**: Energy per time period
-- **Default**: 99999 (effectively unlimited)
-
-#### MinStorageCharge[r, s, y]
-- **Indices**: r = REGION, s = STORAGE, y = YEAR
-- **Purpose**: Minimum storage level as fraction of capacity
-- **Range**: 0 to 1
-- **Example**: 0.2 = must maintain 20% minimum charge
-
-#### OperationalLifeStorage[r, s]
-- **Indices**: r = REGION, s = STORAGE
-- **Purpose**: Lifespan of storage technology in years
-- **Example**: Battery = 15 years, Pumped hydro = 80 years
-
-#### CapitalCostStorage[r, s, y]
-- **Indices**: r = REGION, s = STORAGE, y = YEAR
-- **Purpose**: Capital cost per unit of storage capacity
-- **Units**: Currency per storage capacity unit ($/GWh)
-
-#### ResidualStorageCapacity[r, s, y]
-- **Indices**: r = REGION, s = STORAGE, y = YEAR
-- **Purpose**: Existing storage capacity
-- **Units**: Storage capacity units (GWh, etc.)
-
----
-
-### 6. Capacity Constraint Parameters
-
-#### CapacityOfOneTechnologyUnit[r, t, y]
-- **Purpose**: Capacity of discrete technology units (if lumpy investments)
-- **Units**: Capacity units per unit
-- **Example**: Nuclear plant = 1000 MW (must build in 1 GW increments)
-- **Note**: Set to 0 for continuous capacity investments
-
-#### TotalAnnualMaxCapacity[r, t, y]
-- **Purpose**: Maximum total capacity allowed
-- **Units**: Capacity units
-- **Default**: 99999 (effectively unlimited)
-
-#### TotalAnnualMinCapacity[r, t, y]
-- **Purpose**: Minimum total capacity required
-- **Units**: Capacity units
-- **Example**: Require at least 500 MW of solar by 2030
-
----
-
-### 7. Investment Constraint Parameters
-
-#### TotalAnnualMaxCapacityInvestment[r, t, y]
-- **Purpose**: Maximum new capacity that can be added in a year
-- **Units**: Capacity units
-- **Use**: Limits deployment rate
-
-#### TotalAnnualMinCapacityInvestment[r, t, y]
-- **Purpose**: Minimum new capacity required in a year
-- **Units**: Capacity units
-- **Use**: Forces minimum deployment
-
----
-
-### 8. Activity Constraint Parameters
-
-#### TotalTechnologyAnnualActivityUpperLimit[r, t, y]
-- **Purpose**: Maximum annual activity for technology
-- **Units**: Activity units (PJ)
-- **Default**: 99999
-
-#### TotalTechnologyAnnualActivityLowerLimit[r, t, y]
-- **Purpose**: Minimum annual activity for technology
-- **Units**: Activity units (PJ)
-- **Use**: Ensures minimum utilization
-
-#### TotalTechnologyModelPeriodActivityUpperLimit[r, t]
-- **Purpose**: Maximum cumulative activity over entire model period
-- **Units**: Activity units (PJ)
-
-#### TotalTechnologyModelPeriodActivityLowerLimit[r, t]
-- **Purpose**: Minimum cumulative activity over entire model period
-- **Units**: Activity units (PJ)
-
----
-
-### 9. Reserve Margin Parameters
-
-#### ReserveMarginTagTechnology[r, t, y]
-- **Purpose**: Binary indicator if technology contributes to reserve margin
-- **Range**: 0 or 1
-- **Example**: 1 for dispatchable plants, 0 for wind/solar
-
-#### ReserveMarginTagFuel[r, f, y]
-- **Purpose**: Binary indicator if fuel requires reserve margin
-- **Range**: 0 or 1
-- **Example**: 1 for electricity, 0 for transport fuels
-
-#### ReserveMargin[r, y]
-- **Purpose**: Required reserve margin as fraction of demand
-- **Range**: >1 (e.g., 1.15 = 115% = 15% reserve margin)
-- **Example**: 1.20 = 20% reserve capacity above peak demand
-
----
-
-### 10. Renewable Energy Target Parameters
-
-#### RETagTechnology[r, t, y]
-- **Purpose**: Binary indicator if technology counts as renewable
-- **Range**: 0 or 1
-- **Example**: 1 for wind/solar, 0 for fossil fuels
-
-#### RETagFuel[r, f, y]
-- **Purpose**: Binary indicator if fuel is subject to RE target
-- **Range**: 0 or 1
-- **Example**: 1 for electricity, 0 for other fuels
-
-#### REMinProductionTarget[r, y]
-- **Purpose**: Minimum fraction of target fuel from renewable sources
-- **Range**: 0 to 1
-- **Example**: 0.3 = 30% of electricity from renewables
-
----
-
-### 11. Emissions Parameters
-
-#### EmissionActivityRatio[r, t, e, m, y]
-- **Purpose**: Emissions per unit of activity
-- **Units**: Emission units per activity unit (Mt CO2/PJ)
-- **Example**: Coal plant = 0.095 Mt CO2/PJ
-
-#### EmissionsPenalty[r, e, y]
-- **Purpose**: Cost penalty per unit of emissions
-- **Units**: Currency per emission unit ($/tonne CO2)
-- **Example**: Carbon price = 50 $/tonne CO2
-
-#### AnnualExogenousEmission[r, e, y]
-- **Purpose**: Emissions from sources outside the model
-- **Units**: Emission units (Mt)
-
-#### AnnualEmissionLimit[r, e, y]
-- **Purpose**: Maximum annual emissions allowed
-- **Units**: Emission units (Mt)
-- **Default**: 99999 (unlimited)
-
-#### ModelPeriodExogenousEmission[r, e]
-- **Purpose**: Total exogenous emissions over model period
-- **Units**: Emission units (Mt)
-
-#### ModelPeriodEmissionLimit[r, e]
-- **Purpose**: Total emissions allowed over entire model period
-- **Units**: Emission units (Mt)
-- **Example**: Cumulative CO2 budget = 1000 Mt
-
----
-
-## Variables (Model Outputs)
-
-Variables are calculated by the optimization model. Key output variables include:
-
-### Capacity Variables
-- **NewCapacity[r, t, y]**: New capacity installed in each year
-- **AccumulatedNewCapacity[r, t, y]**: Total accumulated new capacity still operational
-- **TotalCapacityAnnual[r, t, y]**: Total capacity (new + residual)
-
-### Activity Variables
-- **RateOfActivity[r, l, t, m, y]**: Technology activity rate in each timeslice
-- **TotalTechnologyAnnualActivity[r, t, y]**: Total annual technology activity
-- **RateOfProduction[r, l, f, y]**: Total fuel production rate
-- **RateOfUse[r, l, f, y]**: Total fuel consumption rate
-
-### Storage Variables
-- **StorageLevelYearStart[r, s, y]**: Storage level at start of year
-- **RateOfStorageCharge[r, s, ls, ld, lh, y]**: Storage charging rate
-- **RateOfStorageDischarge[r, s, ls, ld, lh, y]**: Storage discharge rate
-
-### Cost Variables
-- **CapitalInvestment[r, t, y]**: Undiscounted capital investment
-- **OperatingCost[r, t, y]**: Annual operating cost
-- **TotalDiscountedCost[r, y]**: Total discounted system cost
-
-### Emissions Variables
-- **AnnualEmissions[r, e, y]**: Total annual emissions by type
-- **ModelPeriodEmissions[r, e]**: Total emissions over model period
-
----
-
-## Data Setup Guide
-
-### Step 1: Define Sets
-
-Create data files defining all sets. For Python (Pyomo), use a .dat file:
-
-```
-set YEAR := 2020 2025 2030 2035 2040 2045 2050;
-
-set REGION := REGION1;
-
-set TECHNOLOGY := 
-    COAL_PP
-    GAS_CCGT
-    NUCLEAR
-    SOLAR_PV
-    WIND_ONSHORE
-    HYDRO;
-
-set FUEL := 
-    COAL
-    GAS
-    URANIUM
-    ELECTRICITY;
-
-set EMISSION := CO2 NOX SO2;
-
-set MODE_OF_OPERATION := MODE1;
-
-set TIMESLICE := 
-    S1D1H1 S1D1H2 S1D1H3
-    S1D2H1 S1D2H2 S1D2H3;
-
-set SEASON := S1;
-set DAYTYPE := D1 D2;
-set DAILYTIMEBRACKET := H1 H2 H3;
-
-set STORAGE := BATTERY PUMPED_HYDRO;
-```
-
-### Step 2: Set Global Parameters
-
-```
-param DiscountRate :=
-    REGION1 0.05;
-
-param YearSplit :=
-    [*, 2020]
-    S1D1H1 0.333
-    S1D1H2 0.333
-    S1D1H3 0.334
-    # ... repeat for all timeslices and years
-    ;
-```
-
-### Step 3: Define Technology Characteristics
-
-```
-param OperationalLife :=
-    REGION1 COAL_PP 40
-    REGION1 GAS_CCGT 30
-    REGION1 NUCLEAR 60
-    REGION1 SOLAR_PV 25
-    REGION1 WIND_ONSHORE 25
-    REGION1 HYDRO 80;
-
-param CapacityToActivityUnit :=
-    REGION1 COAL_PP 31.536
-    REGION1 GAS_CCGT 31.536
-    # ... (converts GW to PJ/year)
-    ;
-
-param CapacityFactor :=
-    [REGION1, COAL_PP, *, *] :=
-        [*, 2020]
-        S1D1H1 0.85
-        S1D1H2 0.85
-        # ... all timeslices
-    [REGION1, SOLAR_PV, *, *] :=
-        [*, 2020]
-        S1D1H1 0.0    # Night
-        S1D1H2 0.7    # Day
-        S1D1H3 0.0    # Evening
-    ;
-```
-
-### Step 4: Define Input/Output Ratios
-
-```
-param InputActivityRatio :=
-    # Coal plant consumes coal
-    [REGION1, COAL_PP, COAL, MODE1, *] :=
-        2020 2.5
-        2025 2.5
-        2030 2.5
-    # Gas plant consumes gas
-    [REGION1, GAS_CCGT, GAS, MODE1, *] :=
-        2020 1.8
-        2025 1.8
-        2030 1.8
-    ;
-
-param OutputActivityRatio :=
-    # All plants produce electricity
-    [REGION1, COAL_PP, ELECTRICITY, MODE1, *] :=
-        2020 1.0
-        2025 1.0
-        2030 1.0
-    [REGION1, GAS_CCGT, ELECTRICITY, MODE1, *] :=
-        2020 1.0
-        2025 1.0
-        2030 1.0
-    ;
-```
-
-### Step 5: Define Costs
-
-```
-param CapitalCost :=
-    [REGION1, *, *] :
-        2020 2025 2030 :=
-    COAL_PP     2000000 2100000 2200000
-    GAS_CCGT    1000000 1000000 1000000
-    SOLAR_PV    1200000 1000000  800000
-    WIND_ONSHORE 1500000 1400000 1300000;
-
-param FixedCost :=
-    [REGION1, *, *] :
-        2020 2025 2030 :=
-    COAL_PP     40000 42000 44000
-    GAS_CCGT    20000 21000 22000
-    SOLAR_PV    15000 14000 13000;
-
-param VariableCost :=
-    [REGION1, *, MODE1, *] :
-        2020 2025 2030 :=
-    COAL_PP     2.5 2.7 3.0
-    GAS_CCGT    4.0 4.5 5.0
-    SOLAR_PV    0.0 0.0 0.0;
-```
-
-### Step 6: Define Demand
-
-```
-param SpecifiedAnnualDemand :=
-    [REGION1, ELECTRICITY, *] :=
-        2020 500
-        2025 550
-        2030 600
-        2035 650
-        2040 700;
-
-param SpecifiedDemandProfile :=
-    [REGION1, ELECTRICITY, *, 2020] :=
-        S1D1H1 0.05  # Night
-        S1D1H2 0.15  # Day
-        S1D1H3 0.10  # Evening
-    # ... must sum to 1.0 across all timeslices
-    ;
-```
-
-### Step 7: Define Emissions
-
-```
-param EmissionActivityRatio :=
-    [REGION1, COAL_PP, CO2, MODE1, *] :=
-        2020 0.095
-        2025 0.095
-        2030 0.095
-    [REGION1, GAS_CCGT, CO2, MODE1, *] :=
-        2020 0.045
-        2025 0.045
-        2030 0.045;
-
-param AnnualEmissionLimit :=
-    [REGION1, CO2, *] :=
-        2020 100
-        2025 90
-        2030 80
-        2035 70
-        2040 60;
-```
-
----
-
-## Parameter Interactions
-
-### Energy Flow Chain
-```mermaid
-graph LR
-    A[Primary Fuels<br/>COAL, GAS] -->|InputActivityRatio| B[Technologies<br/>Activity]
-    B -->|OutputActivityRatio| C[Secondary Fuels<br/>ELECTRICITY]
-    C --> D[Demand<br/>SpecifiedAnnualDemand]
-    
-    B -->|EmissionActivityRatio| E[Emissions<br/>CO2, NOX]
-    E -->|EmissionsPenalty| F[Emission Costs]
-```
-
-### Capacity-Activity Relationship
-```mermaid
-graph TB
-    A[NewCapacity] --> B[AccumulatedNewCapacity]
-    C[ResidualCapacity] --> D[TotalCapacityAnnual]
-    B --> D
-    
-    D -->|×CapacityFactor<br/>×CapacityToActivityUnit| E[Max RateOfActivity]
-    
-    E -->|×AvailabilityFactor| F[Constrained Activity]
-    
-    F -->|×YearSplit| G[TotalAnnualActivity]
-```
-
-### Cost Calculation Flow
-```mermaid
-graph TB
-    A[NewCapacity] -->|×CapitalCost| B[CapitalInvestment]
-    
-    C[TotalCapacityAnnual] -->|×FixedCost| D[AnnualFixedOpCost]
-    
-    E[TotalAnnualActivity] -->|×VariableCost| F[AnnualVariableOpCost]
-    
-    D --> G[OperatingCost]
-    F --> G
-    
-    B -->|÷DiscountFactor| H[DiscountedCapitalInv]
-    G -->|÷DiscountFactor| I[DiscountedOpCost]
-    
-    H --> J[TotalDiscountedCost]
-    I --> J
-    
-    J --> K[ModelPeriodCostByRegion]
-```
-
-### Key Interaction Rules
-
-1. **Energy Balance**: Production ≥ Demand + Use + Trade
-   ```
-   ∑(RateOfProduction) ≥ RateOfDemand + RateOfUse + ∑(Trade)
-   ```
-
-2. **Capacity Constraint**: Activity ≤ Capacity × CapacityFactor
-   ```
-   RateOfActivity ≤ TotalCapacity × CapacityFactor × CapacityToActivityUnit
-   ```
-
-3. **Fuel Conversion**: 
-   ```
-   FuelOut = Activity × OutputActivityRatio
-   FuelIn = Activity × InputActivityRatio
-   ```
-
-4. **Reserve Margin**:
-   ```
-   ∑(Capacity × ReserveMarginTag) ≥ PeakDemand × ReserveMargin
-   ```
-
-5. **RE Target**:
-   ```
-   ∑(RE_Production) ≥ REMinTarget × ∑(TotalTargetFuelProduction)
-   ```
-
----
-
-## Running the Model
-
-### Python (Pyomo) Version
-
-1. **Install Pyomo and solver**:
-   ```bash
-   pip install pyomo
-   # Install GLPK or other LP solver
-   ```
-
-2. **Create data file** (`data.dat`) with all parameters
-
-3. **Run model**:
-   ```python
-   from pyomo.environ import *
-   from pyomo.opt import SolverFactory
-   
-   # Create model instance
-   model = AbstractModel()
-   # ... (include all model code)
-   
-   # Load data and create instance
-   instance = model.create_instance('data.dat')
-   
-   # Solve
-   solver = SolverFactory('glpk')
-   results = solver.solve(instance)
-   
-   # Extract results
-   instance.solutions.load_from(results)
-   ```
-
-### GMPL (.txt) Version
-
-1. **Install GLPK**:
-   ```bash
-   # On Ubuntu/Debian
-   sudo apt-get install glpk-utils
-   
-   # On MacOS
-   brew install glpk
-   ```
-
-2. **Create data file** (`datafile.txt`) in GMPL format
-
-3. **Run model**:
-   ```bash
-   glpsol -m osemosys.txt -d datafile.txt -o results.txt
-   ```
-
-### Output Files
-
-Both versions produce CSV files with results:
-- `NewCapacity.csv`: New capacity investments
-- `TotalCapacityAnnual.csv`: Total capacity by year
-- `ProductionByTechnology.csv`: Energy production
-- `AnnualEmissions.csv`: Emissions by year
-- `TotalDiscountedCost.csv`: System costs
-- And many more detailed outputs...
-
----
-
-## Tips for Model Setup
-
-### 1. Start Simple
-- Begin with 1 region, 3-4 technologies, 2-3 fuels
-- Use simplified timeslice structure (e.g., 4-6 timeslices)
-- Add complexity gradually
-
-### 2. Data Consistency Checks
-- Ensure YearSplit sums to 1.0 for each year
-- Verify SpecifiedDemandProfile sums to 1.0
-- Check that InputActivityRatio and OutputActivityRatio make physical sense
-- Validate that CapacityFactor values are between 0 and 1
-
-### 3. Units Consistency
-- Use consistent energy units throughout (PJ or TWh)
-- Ensure CapacityToActivityUnit converts your capacity units to activity units correctly
-- Keep cost units consistent (e.g., million USD)
-
-### 4. Solver Selection
-- GLPK: Free, suitable for small-medium models
-- CBC: Free, faster than GLPK for larger models
-- CPLEX/Gurobi: Commercial, best for large models
-
-### 5. Debugging
-- If model is infeasible, check:
-  - Demand can be met with available/buildable capacity
-  - Emission limits aren't too restrictive
-  - Capacity constraints aren't contradictory
-  - All required input fuels are available
-
-### 6. Common Pitfalls
-- Forgetting to set OutputActivityRatio for a technology's product
-- Setting both TotalAnnualMax and TotalAnnualMin to conflicting values
-- Not accounting for conversion losses (InputActivityRatio > OutputActivityRatio)
-- Inconsistent timeslice definitions between parameters
-
----
-
-## Parameters and Features Not Implemented in pyoscomp
-
-This section documents OSeMOSYS parameters and features that are **outside the current pyoscomp scope**. These exclusions reflect deliberate design decisions based on project objectives (PyPSA↔OSeMOSYS translation for long-term capacity expansion planning) rather than technical limitations.
-
-### Reserve Margin Constraints
-
-**Parameters Excluded**:
-- `ReserveMargin[r, y]` - Required reserve margin as fraction of demand
-- `ReserveMarginTagTechnology[r, t, y]` - Binary indicator for dispatchable technologies
-- `ReserveMarginTagFuel[r, f, y]` - Binary indicator for fuels requiring reserves
-
-**Rationale**: Reserve margin constraints are **advanced reliability features** focused on ensuring adequate firm capacity to meet peak demand plus planning reserve. While critical for operational planning and resource adequacy studies, these constraints are not in Phase 1 scope. PyPSA's capacity expansion includes implicit adequacy through demand satisfaction constraints, but explicit reserve margin requirements (e.g., "maintain 15% reserve above peak") are not directly translated.
-
-**Future Consideration**: Reserve margin translation could be added in Phase 2+ enhancement if use cases require explicit capacity adequacy constraints beyond energy balance requirements.
-
-### Renewable Energy Target Constraints
-
-**Parameters Excluded**:
-- `REMinProductionTarget[r, y]` - Minimum fraction of target fuel from renewable sources
-- `RETagTechnology[r, t, y]` - Binary indicator for renewable technologies
-- `RETagFuel[r, f, y]` - Binary indicator for fuels subject to RE targets
-
-**Rationale**: RE target constraints enforce **policy mandates** such as "30% of electricity from renewables by 2030". While valuable for policy scenario analysis, these are **policy-specific constraints** not inherent to physical energy system modeling. PyPSA scenarios can incorporate RE targets through cost assumptions, capacity limits, or post-processing validation, but explicit RE percentage constraints are not core to translation framework.
-
-**Future Consideration**: Could be implemented as optional constraint module if policy scenario modeling becomes primary use case.
-
-### Emissions Tracking and Limits
-
-**Parameters Excluded**:
-- `EMISSION` set - Pollutants and greenhouse gases
-- `EmissionActivityRatio[r, t, e, m, y]` - Emissions per unit of activity
-- `EmissionsPenalty[r, e, y]` - Carbon price or emission penalty
-- `AnnualEmissionLimit[r, e, y]` - Maximum annual emissions
-- `ModelPeriodEmissionLimit[r, e]` - Cumulative emissions budget
-- `AnnualExogenousEmission[r, e, y]` - Emissions from outside model
-- `ModelPeriodExogenousEmission[r, e]` - Cumulative exogenous emissions
-
-**Rationale**: Emissions tracking represents **environmental modeling layer** requiring emission factor data, carbon pricing assumptions, and policy constraint definitions. While OSeMOSYS has robust emissions accounting, pyoscomp Phase 1 focuses on **energy balance and capacity optimization fundamentals**. PyPSA includes carrier-level emissions (e.g., `carrier.co2_emissions`), but comprehensive multi-pollutant tracking (CO2, NOx, SO2, PM) with annual/cumulative limits is planned for **Phase 2 enhancement**.
-
-**Implementation Path**: Emissions parameters are well-defined in OSeMOSYS and PyPSA, making future implementation straightforward. Requires:
-1. Emission factor mapping from PyPSA carriers to OSeMOSYS EmissionActivityRatio
-2. Carbon price translation from PyPSA GlobalConstraint to EmissionsPenalty
-3. Emission limit translation from PyPSA constraints to Annual/ModelPeriodEmissionLimit
-
-### Advanced Capacity Constraints
-
-**Parameters Excluded** (beyond basic investment limits):
-- `TotalAnnualMaxCapacity[r, t, y]` - Absolute capacity ceiling (partially implemented)
-- `TotalAnnualMinCapacity[r, t, y]` - Minimum capacity mandates (partially implemented)
-- `TotalAnnualMaxCapacityInvestment[r, t, y]` - Annual deployment rate limits
-- `TotalAnnualMinCapacityInvestment[r, t, y]` - Minimum annual deployment
-- `CapacityOfOneTechnologyUnit[r, t, y]` - Lumpy investment constraints (integer units)
-
-**Rationale**: Advanced capacity constraints enable modeling of:
-- **Deployment rate limits**: Reflect supply chain, permitting, or construction capacity constraints
-- **Minimum deployment mandates**: Policy-driven technology adoption requirements
-- **Lumpy investments**: Nuclear plants, large hydro (must build in discrete units)
-
-These features add **model complexity** and may require mixed-integer programming (MIP) solvers. Phase 1 focuses on **continuous capacity optimization** with basic bounds. Advanced constraints require careful translation of PyPSA's extendable capacity logic to OSeMOSYS's more granular investment control parameters.
-
-**Future Consideration**: Deployment rate limits are valuable for realistic transition pathway modeling. Could be added as optional constraint module with user-specified limits.
-
-### Storage-Specific Advanced Features
-
-**Parameters Partially Excluded**:
-- `StorageLevelYearStart[r, s, y]` - Year-start storage level (instead of initial)
-- `StorageLevelSeasonStart[r, s, ls, y]` - Season-start storage level
-- `StorageLevelDayTypeStart[r, s, ls, ld, y]` - Day-start storage level
-
-**Rationale**: OSeMOSYS supports **hierarchical storage level constraints** at year/season/daytype boundaries, enabling seasonal storage modeling (e.g., "reservoir must be 50% full at start of dry season"). Phase 1 implements basic storage with `StorageLevelStart` (model start only). Hierarchical constraints require deeper timeslice logic integration and use case validation.
-
-**Implementation Path**: Extension requires mapping PyPSA Store `e_cyclic` and `e_initial` to OSeMOSYS hierarchical level constraints, plus user specification of season/daytype boundary requirements.
-
-### Mode-Specific Advanced Features
-
-**Parameters Excluded**:
-- Multi-mode cost variations: `VariableCost[r, t, m, y]` where costs differ significantly by mode
-- Mode-specific capacity factors: Different availability by operational mode
-
-**Rationale**: PyPSA represents multi-mode operation primarily through **multi-port Links** (sector coupling, CHP) where different port configurations imply different modes. Translation to OSeMOSYS MODE_OF_OPERATION is planned for Phase 4 Link decomposition. Phase 1-3 focuses on single-mode operation for supply technologies.
-
-**Implementation Path**: Link→MODE_OF_OPERATION decomposition (Task 4.5) will implement multi-mode logic with port-specific efficiency and cost mappings.
-
-### Trade and Network Flow
-
-**Parameters Excluded**:
-- `TradeRoute[r, rr, f, y]` - Inter-regional trade routes
-- Trade capacity limits and costs
-- Network flow constraints between regions
-
-**Rationale**: OSeMOSYS models inter-regional trade as **commodity flow between REGION entities**, abstracting away physical network topology. PyPSA models **explicit network flow** (Lines, Transformers) with Kirchhoff's laws, impedance, and voltage constraints. Translating PyPSA's network-centric model to OSeMOSYS's region-centric model requires:
-1. Bus→Region aggregation decisions
-2. Line/Transformer→TradeRoute mapping logic
-3. Network capacity→Trade capacity conversion
-
-This is **complex architectural translation** requiring user specification of regional boundaries. Phase 1 assumes **single-region models** or user-defined regional structure. Multi-region with trade is **Phase 4+ enhancement**.
-
-**Implementation Note**: If PyPSA buses map to distinct OSeMOSYS regions, Lines can translate to TradeRoute with capacity limits. However, AC/DC power flow physics are not preserved in OSeMOSYS's commodity flow formulation.
-
-### Implementation Philosophy
-
-**Minimal Viable Scope**: Phase 1 implements **energy balance fundamentals** (time, topology, demand, supply, storage, costs) enabling basic capacity expansion studies. Advanced features (reserves, emissions, RE targets, trade) are excluded to maintain focus and ensure robust core functionality.
-
-**Extensible Architecture**: Component-based design (scenario/components/) enables modular addition of excluded parameters. Each enhancement (e.g., emissions) can be implemented as isolated component without refactoring core logic.
-
-**User Guidance**: Users requiring excluded features should:
-1. **Check planning.md**: Verify if feature has documented translation approach
-2. **Manual specification**: Use OSeMOSYS parameter files directly for unsupported constraints
-3. **Post-processing**: Apply policy constraints (RE targets, emission limits) via result validation rather than model constraints
-
----
-
-## Further Resources
-
-- **Official Documentation**: www.osemosys.org
-- **GitHub Repository**: github.com/OSeMOSYS
-- **Example Models**: Available in the OSeMOSYS repository
