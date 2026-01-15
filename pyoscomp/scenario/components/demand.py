@@ -519,7 +519,6 @@ class DemandComponent(ScenarioComponent):
 
         # --- Formatting ---
         ax.set_ylabel("Energy Demand (Model Units)")
-        ax.tick_params(axis='x', labelrotation=45)
         ax.set_title(f"Demand Composition: {region} - {fuel}")
 
         # Custom legend: only show daytype and timebracket
@@ -605,7 +604,7 @@ class DemandComponent(ScenarioComponent):
 
             # Prepare data for stackplot
             y_arrays = [grouped[fuel].values for fuel in fuel_names]
-            polys = ax.stackplot(years, y_arrays, labels=fuel_names, colors=COLOR[0])
+            polys = ax.stackplot(years, y_arrays, labels=fuel_names, colors=COLOR)
             # Apply hatches to the stackplot polygons
             for poly, fuel in zip(polys, fuel_names):
                 poly.set_hatch(fuel_hatch_map[fuel])

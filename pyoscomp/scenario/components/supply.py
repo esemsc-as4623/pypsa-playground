@@ -272,8 +272,12 @@ class SupplyComponent(ScenarioComponent):
         for y in years:
             eff = eff_map[y]
             input_ratio, output_ratio = self._apply_efficiency_to_ratios(eff, mode=mode)
-            input_records.append({"REGION": region, "TECHNOLOGY": technology, "FUEL": input_fuel, "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": input_ratio})
-            output_records.append({"REGION": region, "TECHNOLOGY": technology, "FUEL": output_fuel, "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": output_ratio})
+            input_records.append({
+                "REGION": region, "TECHNOLOGY": technology, "FUEL": input_fuel, 
+                "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": input_ratio})
+            output_records.append({
+                "REGION": region, "TECHNOLOGY": technology, "FUEL": output_fuel, 
+                "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": output_ratio})
         
         self.input_activity_ratio = self.add_to_dataframe(self.input_activity_ratio, input_records,
                                                           key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
@@ -362,24 +366,16 @@ class SupplyComponent(ScenarioComponent):
                 # Input ratios
                 for fuel, ratio in inputs.items():
                     input_records.append({
-                        "REGION": region, 
-                        "TECHNOLOGY": technology, 
-                        "FUEL": fuel, 
-                        "MODE_OF_OPERATION": mode, 
-                        "YEAR": y, 
-                        "VALUE": ratio
+                        "REGION": region, "TECHNOLOGY": technology, "FUEL": fuel, 
+                        "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio
                     })
                     self.defined_fuels.add(fuel)
                 
                 # Output ratios
                 for fuel, ratio in outputs.items():
                     output_records.append({
-                        "REGION": region, 
-                        "TECHNOLOGY": technology, 
-                        "FUEL": fuel, 
-                        "MODE_OF_OPERATION": mode, 
-                        "YEAR": y, 
-                        "VALUE": ratio
+                        "REGION": region, "TECHNOLOGY": technology, "FUEL": fuel, 
+                        "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio
                     })
                     self.defined_fuels.add(fuel)
         
@@ -474,28 +470,29 @@ class SupplyComponent(ScenarioComponent):
         if isinstance(year, list) and not all(y in self.years for y in year):
             raise ValueError(f"One or more years in {year} not defined in scenario years.")
         
+        # Determine which years to apply to
         if isinstance(year, int):
             years = [year]
         elif isinstance(year, list):
             years = year
         else:
-            years = [self.years[0]]
-
+            years = self.years  # Apply to ALL years, not just first
+        
+        # Create comprehensive timeslice factor dict ONCE (efficiency optimization)
+        if timeslice_factor is not None:
+            cf_dict = self._apply_timeslice_factors(timeslice_factor, default=1.0)
+        elif any(f is not None for f in [season_factor, day_factor, time_factor]):
+            cf_dict = self._apply_hierarchical_factors(
+                season_factor or {}, day_factor or {}, time_factor or {}, default=1.0
+            )
+        else:
+            cf_dict = self._apply_timeslice_factors({}, default=1.0)
+        
+        # Apply to all specified years
         for y in years:
-            # Create comprehensive timeslice factor dict
-            if timeslice_factor is not None:
-                timeslice_factor = self._apply_timeslice_factors(timeslice_factor, default=1.0)
-            elif any(f is not None for f in [season_factor, day_factor, time_factor]):
-                timeslice_factor = self._apply_hierarchical_factors(
-                    season_factor or {}, day_factor or {}, time_factor or {}, default=1.0
-                )
-            else: # Default to 1.0 for all timeslices
-                timeslice_factor = self._apply_timeslice_factors({}, default=1.0)
-            self.capacity_factor_assignments[(region, technology, y)] = {"type": "custom", "weights": timeslice_factor}
-        # Apply to all years if year is None
-        if year is None:
-            for y in self.years[1:]:
-                self.capacity_factor_assignments[(region, technology, y)] = self.capacity_factor_assignments[(region, technology, years[0])]
+            self.capacity_factor_assignments[(region, technology, y)] = {
+                "type": "custom", "weights": cf_dict
+            }
 
     def set_availability_factor(self, region, technology, availability):
         """
@@ -822,6 +819,10 @@ class SupplyComponent(ScenarioComponent):
         errors = []
         
         # Check 1: Every technology must have at least one output
+        if self.output_activity_ratio.empty:
+            errors.append("No output activity ratios defined for any technology.")
+            raise ValueError("\n".join(errors))
+        
         techs_with_outputs = set(
             zip(self.output_activity_ratio['REGION'], 
                 self.output_activity_ratio['TECHNOLOGY'])
@@ -833,71 +834,41 @@ class SupplyComponent(ScenarioComponent):
                     f"Technology '{technology}' in region '{region}' has no output activity ratios defined."
                 )
         
-        # Check 2: Modes must be consistent across years for each technology
-        for (region, technology), modes in self.mode_definitions.items():
-            # Get all modes from input ratios
-            input_modes = self.input_activity_ratio[
-                (self.input_activity_ratio['REGION'] == region) & 
-                (self.input_activity_ratio['TECHNOLOGY'] == technology)
-            ]['MODE_OF_OPERATION'].unique()
-            
-            # Get all modes from output ratios
-            output_modes = self.output_activity_ratio[
-                (self.output_activity_ratio['REGION'] == region) & 
-                (self.output_activity_ratio['TECHNOLOGY'] == technology)
-            ]['MODE_OF_OPERATION'].unique()
-            
-            # Every output mode should have corresponding inputs (or be a resource tech)
-            for mode in output_modes:
-                if mode not in input_modes and len(input_modes) > 0:
-                    # This is acceptable for resource technologies
-                    pass
-            
-            # Every input mode must have outputs
-            for mode in input_modes:
-                if mode not in output_modes:
-                    errors.append(
-                        f"Technology '{technology}' in region '{region}' has mode '{mode}' "
-                        f"with inputs but no outputs."
-                    )
-        
-        # Check 3: For each (region, tech, mode, year), ensure activity ratios make sense
-        for region, technology in self.defined_tech:
-            for year in self.years:
-                # Get input fuels for this year
-                inputs_df = self.input_activity_ratio[
+        # Check 2: Every input mode must have corresponding outputs
+        if not self.input_activity_ratio.empty:
+            for region, technology in self.defined_tech:
+                input_modes = self.input_activity_ratio[
                     (self.input_activity_ratio['REGION'] == region) & 
-                    (self.input_activity_ratio['TECHNOLOGY'] == technology) & 
-                    (self.input_activity_ratio['YEAR'] == year)
-                ]
+                    (self.input_activity_ratio['TECHNOLOGY'] == technology)
+                ]['MODE_OF_OPERATION'].unique()
                 
-                # Get output fuels for this year
-                outputs_df = self.output_activity_ratio[
+                output_modes = self.output_activity_ratio[
                     (self.output_activity_ratio['REGION'] == region) & 
-                    (self.output_activity_ratio['TECHNOLOGY'] == technology) & 
-                    (self.output_activity_ratio['YEAR'] == year)
-                ]
+                    (self.output_activity_ratio['TECHNOLOGY'] == technology)
+                ]['MODE_OF_OPERATION'].unique()
                 
-                if outputs_df.empty and (region, technology) in techs_with_outputs:
-                    errors.append(
-                        f"Technology '{technology}' in region '{region}' has no outputs "
-                        f"defined for year {year}."
-                    )
+                # Every input mode must have outputs
+                for mode in input_modes:
+                    if mode not in output_modes:
+                        errors.append(
+                            f"Technology '{technology}' in region '{region}' has mode '{mode}' "
+                            f"with inputs but no outputs."
+                        )
         
-        # Check 4: Validate ratio values are positive
-        if (self.input_activity_ratio['VALUE'] < 0).any():
-            negative_inputs = self.input_activity_ratio[self.input_activity_ratio['VALUE'] < 0]
+        # Check 3: Validate ratio values are positive
+        if not self.input_activity_ratio.empty and (self.input_activity_ratio['VALUE'] <= 0).any():
+            negative_inputs = self.input_activity_ratio[self.input_activity_ratio['VALUE'] <= 0]
             for _, row in negative_inputs.iterrows():
                 errors.append(
-                    f"Negative input activity ratio: {row['TECHNOLOGY']} in {row['REGION']}, "
+                    f"Non-positive input activity ratio: {row['TECHNOLOGY']} in {row['REGION']}, "
                     f"fuel {row['FUEL']}, mode {row['MODE_OF_OPERATION']}, year {row['YEAR']}: {row['VALUE']}"
                 )
         
-        if (self.output_activity_ratio['VALUE'] < 0).any():
-            negative_outputs = self.output_activity_ratio[self.output_activity_ratio['VALUE'] < 0]
+        if not self.output_activity_ratio.empty and (self.output_activity_ratio['VALUE'] <= 0).any():
+            negative_outputs = self.output_activity_ratio[self.output_activity_ratio['VALUE'] <= 0]
             for _, row in negative_outputs.iterrows():
                 errors.append(
-                    f"Negative output activity ratio: {row['TECHNOLOGY']} in {row['REGION']}, "
+                    f"Non-positive output activity ratio: {row['TECHNOLOGY']} in {row['REGION']}, "
                     f"fuel {row['FUEL']}, mode {row['MODE_OF_OPERATION']}, year {row['YEAR']}: {row['VALUE']}"
                 )
         
@@ -910,123 +881,7 @@ class SupplyComponent(ScenarioComponent):
     
     # === Visualization ===
     def visualize_technologies(self):
-        """
-        Creates a visualization of the technologies available over the model years.
-        """
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-        from matplotlib.patches import Circle, Wedge
-        
-        # --- Styles ---
-        COLOR = ['darkslategrey']
-        HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
-        plt.rcParams.update({
-            'font.size': 14,
-            'text.color': 'black',
-            'axes.labelcolor': 'black',
-            'xtick.color': 'black',
-            'ytick.color': 'black',
-            'font.family': 'sans-serif'
-        })
-
-        # --- Load Data ---
-        self.load()
-        df_operation = self.operational_life.copy()
-        df_fuel = self.output_activity_ratio.copy()
-        df_availability = self.availability_factor.copy()
-
-        regions = sorted(df_operation['REGION'].unique())
-        all_technologies = sorted(df_operation['TECHNOLOGY'].unique())
-        output_fuels = sorted(df_fuel['FUEL'].unique())
-        n_regions = len(regions)
-
-        # Assign style map
-        fuel_hatch_map = {fuel: HATCHES[i % len(HATCHES)] for i, fuel in enumerate(output_fuels)}
-        
-        ncols, nrows = 1, n_regions
-
-        # --- Plotting ---
-        tech_y_map = {tech: i for i, tech in enumerate(all_technologies)}
-        y_limit_bottom = -0.5
-        y_limit_top = len(all_technologies) - 0.5
-
-        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, 
-                                figsize=(12, 1.0 * len(all_technologies) * nrows), 
-                                sharex=True)
-        if n_regions == 1:
-            axes = [axes]
-        else:
-            axes = axes.flatten()
-
-        for idx, region in enumerate(regions):
-            ax = axes[idx]
-            region_op_life = df_operation[df_operation['REGION'] == region]
-            region_outputs = df_fuel[df_fuel['REGION'] == region]
-
-            ax.set_yticks(list(tech_y_map.values()))
-            ax.set_yticklabels(all_technologies)
-            ax.set_ylim(y_limit_bottom, y_limit_top)
-            ax.invert_yaxis()
-
-            for tech in all_technologies:
-                y_pos = tech_y_map[tech]
-
-                op_life_row = region_op_life[region_op_life['TECHNOLOGY'] == tech]
-                tech_outputs = region_outputs[region_outputs['TECHNOLOGY'] == tech]
-                region_availability = df_availability[df_availability['REGION'] == region]
-
-                if not op_life_row.empty and not tech_outputs.empty:
-                    op_life = int(op_life_row['VALUE'].iloc[0])
-                    start_year = min(self.years)
-                    end_year = min(start_year + op_life - 1, max(self.years))
-
-                    fuel_counts = tech_outputs['FUEL'].value_counts()
-                    primary_fuel = fuel_counts.idxmax() if not fuel_counts.empty else output_fuels[0]
-                    last_availability = 1.0
-
-                    radius = 0.5
-                    center_y = y_pos + radius - 0.5
-
-                    for year in range(start_year, end_year + 1):
-                        if year in self.years:
-                            # Get availability for this specific year
-                            avail_row = region_availability[
-                                (region_availability['TECHNOLOGY'] == tech) & 
-                                (region_availability['YEAR'] == year)
-                            ]
-                            availability = avail_row['VALUE'].iloc[0] if not avail_row.empty else 1.0
-                            last_availability = availability
-
-                        x = year
-                        if last_availability >= 1.0:
-                            patch = Circle((x, center_y), radius, facecolor=COLOR[0], edgecolor='white', linewidth=0.5, hatch=fuel_hatch_map[primary_fuel])
-                        else:
-                            theta2 = 360 * last_availability
-                            patch = Wedge((x, center_y), radius, -90, theta2 - 90, facecolor=COLOR[0], edgecolor='white', linewidth=0.5, hatch=fuel_hatch_map[primary_fuel])
-                        ax.add_patch(patch)
-
-            ax.set_title(f"Region: {region}", loc='right')
-            ax.grid(axis='x', linestyle='--', alpha=0.4)
-            ax.set_xticks(self.years)
-            ax.set_xlim(min(self.years) - 0.5, max(self.years) + 0.5)
-            ax.set_aspect('equal')
-
-            if idx == n_regions - 1:
-                ax.set_xlabel("Year")
-
-        # --- Formatting ---
-        fuel_handles = [
-            mpatches.Patch(facecolor='white', edgecolor='k', label=fuel, hatch=fuel_hatch_map[fuel])
-            for fuel in output_fuels
-        ]
-        fig.legend(
-            handles=fuel_handles,
-            title="Output Fuel", labels=output_fuels,
-            loc='upper center', bbox_to_anchor=(0.5, 0.98),
-            ncol=min(len(fuel_handles), 5), frameon=False, handleheight=2.0, handlelength=3.0
-        )
-        plt.tight_layout()
-        plt.show()
+        pass
         
     def visualize_capacity_mix(self):
         """
@@ -1128,7 +983,7 @@ class SupplyComponent(ScenarioComponent):
         plt.tight_layout(rect=[0, 0, 1, 0.97])
         plt.show()
 
-    def visualize_generation_profile(self, region, fuel, legend=True, ax=None):
+    def visualize_potential(self, region, fuel, legend=True):
         """
         Visualize generation/activity profile across timeslices for technologies.
         Shows how capacity factors and availability affect generation patterns.
@@ -1144,15 +999,13 @@ class SupplyComponent(ScenarioComponent):
         - Actual generation potential (after capacity factor)
         """
         import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-        import numpy as np
 
         # --- Styles ---
         COLOR = ['darkslategrey']
         CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00']
         HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
         plt.rcParams.update({
-            'font.size': 14,
+            'font.size': 14, 
             'text.color': 'black',
             'axes.labelcolor': 'black',
             'xtick.color': 'black',
@@ -1162,7 +1015,6 @@ class SupplyComponent(ScenarioComponent):
 
         # --- Load Data ---
         self.load()
-        years = self.years
 
         techs = self.output_activity_ratio[
             (self.output_activity_ratio['REGION'] == region) &
@@ -1180,110 +1032,88 @@ class SupplyComponent(ScenarioComponent):
             return
         
         # --- Process Data ---
-        timeslices = self.time_axis['TIMESLICE'].unique()
-        daytypes = sorted(self.time_axis['DayType'].unique())
-        timebrackets = sorted(self.time_axis['DailyTimeBracket'].unique())
-        seasons = sorted(self.time_axis['Season'].unique())
-        dt_style_map = {d: CB_PALETTE[i % len(CB_PALETTE)] for i, d in enumerate(daytypes)}
-        tb_hatch_map = {b: HATCHES[i % len(HATCHES)] for i, b in enumerate(timebrackets)}
+        data = []
+        seasons = set()
+        daytypes = set()
+        timebrackets = set()
 
-        # --- Plotting ---
-        fig, axes = plt.subplots(nrows=n_techs, ncols=1, figsize=(12, 7 * n_techs), sharex=True)
+        for ts in self.time_axis['TIMESLICE'].unique():
+            row = self.time_axis.loc[self.time_axis['TIMESLICE'] == ts].iloc[0]
+            season, daytype, timebracket = row['Season'], row['DayType'], row['DailyTimeBracket']
+
+            seasons.add(season)
+            daytypes.add(daytype)
+            timebrackets.add(timebracket)
+
+            data.append({"ts": ts, "season": season, "daytype": daytype, "timebracket": timebracket})
+
+        dt_style_map = {d: CB_PALETTE[i % len(CB_PALETTE)] for i, d in enumerate(sorted(daytypes))}
+        tb_hatch_map = {b: HATCHES[i % len(HATCHES)] for i, b in enumerate(sorted(timebrackets))}
+
+        fig, axes = plt.subplots(nrows=n_techs, ncols=1, figsize=(12, 7 * n_techs),
+                                 sharex=True, sharey=True)
         if n_techs == 1:
-            axes = [axes]
+            ax = [axes]
         else:
-            axes = axes.flatten()
-
-        for idx, tech in enumerate(techs_sorted):
-            ax = axes[idx]
-            # Residual capacity per year
-            cap_df = self.residual_capacity[
+            ax = axes.flatten()
+        
+        # --- Plotting ---
+        for t, tech in enumerate(techs_sorted):
+            df_res = self.residual_capacity[
                 (self.residual_capacity['REGION'] == region) &
                 (self.residual_capacity['TECHNOLOGY'] == tech)
             ]
-            cap_map = {row['YEAR']: row['VALUE'] for _, row in cap_df.iterrows()}
-            installed = np.array([cap_map.get(y, 0) for y in years])
+            df_avail = self.availability_factor[
+                (self.availability_factor['REGION'] == region) &
+                (self.availability_factor['TECHNOLOGY'] == tech)
+            ]
+            df_cap = self.capacity_factor[
+                (self.capacity_factor['REGION'] == region) &
+                (self.capacity_factor['TECHNOLOGY'] == tech)
+            ]
+            merged = pd.merge(df_avail, df_cap, on='YEAR')
+            merged['AVAIL x CAP'] = merged['VALUE_x'] * merged['VALUE_y']
 
-            # Plot installed capacity as a background bar
-            ax.bar(years, installed, color=COLOR[0], alpha=0.25, label="Installed Capacity")
+            plot_data = merged.pivot(index='YEAR', columns='TIMESLICE', values='VALUE_y') # AVAIL x CAP
+            plot_data = plot_data.reindex(sorted(plot_data.columns), axis=1)
 
-            # Prepare generation potential stacking by timeslice
-            # For each year, stack by season, then within each season stack by timeslice
-            for y_idx, year in enumerate(years):
-                # Get availability factor
-                af_row = self.availability_factor[
-                    (self.availability_factor['REGION'] == region) &
-                    (self.availability_factor['TECHNOLOGY'] == tech) &
-                    (self.availability_factor['YEAR'] == year)
-                ]
-                availability = af_row['VALUE'].iloc[0] if not af_row.empty else 1.0
+            bottoms = df_res.set_index('YEAR')['VALUE'].reindex(plot_data.index, fill_value=0).values
+            years_x = plot_data.index.astype(str)
+            # Add residual capacity
+            ax[t].bar(years_x, bottoms, color=COLOR[0], edgecolor='white', linewidth=0.5, alpha=0.1)
 
-                # Get capacity factor profile for this year
-                cf_rows = self.capacity_factor[
-                    (self.capacity_factor['REGION'] == region) &
-                    (self.capacity_factor['TECHNOLOGY'] == tech) &
-                    (self.capacity_factor['YEAR'] == year)
-                ]
-                cf_map = {row['TIMESLICE']: row['VALUE'] for _, row in cf_rows.iterrows()}
+            legend_handles = {}
+            for d in data:
+                values = plot_data[d['ts']].fillna(0).values
+                color = dt_style_map[d['daytype']]
+                hatch = tb_hatch_map[d['timebracket']]
+                legend_key = f"{d['daytype']} | {d['timebracket']}"
+                # Only add a handle for each (daytype, timebracket) combo once
+                bar = ax[t].bar(
+                    years_x, values, bottom=bottoms,
+                    label=None, color=color, hatch=hatch,
+                    edgecolor='white', linewidth=0.5
+                )
+                if legend_key not in legend_handles:
+                    legend_handles[legend_key] = bar[0]
+                bottoms += values
+            
+            # --- Formatting ---
+            ax[t].set_ylabel(f"{tech} Generation Potential (Model Units)")
+            ax[t].set_title(f"Generation Profile: {region} - {tech} ({fuel})")
 
-                # Stack by season
-                season_bottom = np.zeros(len(seasons))
-                for s_idx, season in enumerate(seasons):
-                    # Filter timeslices for this season
-                    ts_in_season = self.time_axis[self.time_axis['Season'] == season]['TIMESLICE'].unique()
-                    # For each timeslice, get DayType and TimeBracket
-                    bar_bottom = season_bottom[s_idx]
-                    for ts in ts_in_season:
-                        dt = self.time_axis[self.time_axis['TIMESLICE'] == ts]['DayType'].iloc[0]
-                        tb = self.time_axis[self.time_axis['TIMESLICE'] == ts]['DailyTimeBracket'].iloc[0]
-                        cf = cf_map.get(ts, 1.0)
-                        gen_potential = installed[y_idx] * availability * cf
-                        # Plot stacked bar for this timeslice
-                        ax.bar(
-                            year, gen_potential, bottom=bar_bottom,
-                            color=dt_style_map[dt], hatch=tb_hatch_map[tb],
-                            edgecolor='white', linewidth=0.5
-                        )
-                        bar_bottom += gen_potential
-                    season_bottom[s_idx] = bar_bottom
+            # Custom legend: only show daytype and timebracket
+            if legend:
+                handles = list(legend_handles.values())
+                labels = list(legend_handles.keys())
+                if len(handles) > 10:
+                    ax[t].legend(handles, labels, title="Daytype | Timebracket", bbox_to_anchor=(1.05, 1), loc='upper left')
+                else:
+                    ax[t].legend(handles, labels, title="Daytype | Timebracket", loc='best')
 
-            ax.set_ylabel("Energy Supply (Model Units)")
-            ax.set_title(f"{tech} Installed Capacity + Generation Potential: {region} - {fuel}")
-            ax.set_xticks(years)
-            ax.set_xticklabels(years, rotation=0)
-            ax.grid(axis='y', linestyle='--', alpha=0.5)
-            if idx == n_techs - 1:
-                ax.set_xlabel("Year")
-        
-        # --- Formatting ---
-        legend_handles = []
-        for dt in daytypes:
-            legend_handles.append(mpatches.Patch(facecolor=dt_style_map[dt], edgecolor='white', label=dt))
-        for tb in timebrackets:
-            legend_handles.append(mpatches.Patch(facecolor='white', edgecolor='black', label=tb, hatch=tb_hatch_map[tb]))
-        if legend:
-            fig.legend(
-                handles=legend_handles,
-                title="DayType (color) / TimeBracket (hatch)",
-                loc='upper center', bbox_to_anchor=(0.5, 1.05),
-                ncol=min(len(legend_handles), 6), frameon=False, handleheight=2.0, handlelength=3.0
-            )
-
-        plt.tight_layout(rect=[0, 0, 1, 0.97])
+        plt.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.tight_layout()
         plt.show()
-
-    def visualize_conversion_efficiency(self, region, technologies=None, ax=None):
-        """
-        Visualize conversion efficiencies for technologies over time.
-        Useful for comparing technology performance and efficiency improvements.
-        
-        :param region: str, Region to visualize
-        :param technologies: list[str] or None. Technologies to compare
-        :param ax: matplotlib axis object or None
-        
-        Creates line plot showing efficiency trends.
-        """
-        pass
 
     def visualize_fuel_balance(self, region, fuel, year, ax=None):
         """
@@ -1299,20 +1129,5 @@ class SupplyComponent(ScenarioComponent):
         - Production by technology
         - Consumption by technology
         - Net balance
-        """
-        pass
-
-    def visualize_all(self, output_dir=None):
-        """
-        Create comprehensive visualization suite for all regions and technologies.
-        Generates multiple plots and optionally saves to output directory.
-        
-        :param output_dir: str or None. Directory to save plots. If None, displays interactively.
-        
-        Generates:
-        - Capacity mix by region
-        - Generation profiles by technology type
-        - Efficiency comparisons
-        - Fuel balance diagrams
         """
         pass
