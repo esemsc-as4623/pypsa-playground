@@ -214,15 +214,15 @@ class SupplyComponent(ScenarioComponent):
         Example::
             # Gas power plant with 55% efficiency
             supply.set_conversion_technology('Region1', 'GAS_CCGT', 
-                                            input_fuel='GAS_NAT', 
-                                            output_fuel='ELEC',
-                                            efficiency=0.55)
+                                             input_fuel='GAS_NAT', 
+                                             output_fuel='ELEC',
+                                             efficiency=0.55)
             
             # Efficiency improving over time
             supply.set_conversion_technology('Region1', 'SOLAR_PV',
-                                            input_fuel='SOLAR_RESOURCE',
-                                            output_fuel='ELEC',
-                                            efficiency={2020: 0.18, 2030: 0.22, 2040: 0.25})
+                                             input_fuel='SOLAR_RESOURCE',
+                                             output_fuel='ELEC',
+                                             efficiency={2020: 0.18, 2030: 0.22, 2040: 0.25})
         """
         # --- VALIDATION: Region, Technology, Year, Fuel, Efficiency ---
         if region not in self.regions:
@@ -252,10 +252,20 @@ class SupplyComponent(ScenarioComponent):
             years = self.years
         
         # Map year to efficiency
+        # Implicitly uses step interpolation
         if isinstance(efficiency, dict):
-            eff_map = {y: efficiency.get(y, list(efficiency.values())[0]) for y in years}
+            eff_years = sorted(efficiency.keys())
+            eff_map = {}
+            for y in self.years:
+                prev_years = [ey for ey in eff_years if ey <= y]
+                if prev_years:
+                    last_year = max(prev_years)
+                    eff_map[y] = efficiency[last_year]
+                else:
+                    first_year = min(eff_years)
+                    eff_map[y] = efficiency[first_year]
         else:
-            eff_map = {y: efficiency for y in years}
+            eff_map = {y: efficiency for y in self.years}
         
         # Compute input/output activity ratios
         input_records, output_records = [], []
@@ -1018,28 +1028,114 @@ class SupplyComponent(ScenarioComponent):
         plt.tight_layout()
         plt.show()
         
-    def visualize_capacity_mix(self, region, year=None, by_fuel=False, ax=None):
+    def visualize_capacity_mix(self):
         """
-        Visualize the technology capacity mix for a region.
-        Can show either technology breakdown or group by output fuel.
-        
-        :param region: str, Region to visualize
-        :param year: int, list[int], or None. Specific year(s) or all years if None
-        :param by_fuel: bool, If True groups technologies by primary output fuel
-        :param ax: matplotlib axis object or None
-        
-        Creates a stacked bar chart showing capacity composition over time.
+        Visualize the technology capacity mix for all regions.
+        Creates a stacked bar chart showing capacity composition of legacy infrastructure over time.
         """
-        pass
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        import numpy as np
 
-    def visualize_generation_profile(self, region, technology=None, year=None, ax=None):
+        # --- Styles ---
+        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00'][::-1]
+        HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
+        plt.rcParams.update({
+            'font.size': 14, 
+            'text.color': 'black',
+            'axes.labelcolor': 'black',
+            'xtick.color': 'black',
+            'ytick.color': 'black',
+            'font.family': 'sans-serif'
+        })
+        
+        # --- Load Data ---
+        self.load()
+        regions = sorted(self.residual_capacity['REGION'].unique())
+        n_regions = len(regions)
+        years = self.years
+
+        all_techs = sorted(self.residual_capacity['TECHNOLOGY'].unique())
+        all_fuels = sorted(self.output_activity_ratio['FUEL'].unique())
+
+        # --- Process Data ---
+        tech_to_fuel = {}
+        for tech in all_techs:
+            fuels = self.output_activity_ratio[self.output_activity_ratio['TECHNOLOGY'] == tech]['FUEL']
+            if not fuels.empty:
+                tech_to_fuel[tech] = fuels.value_counts().idxmax()
+            else:
+                tech_to_fuel[tech] = 'Unknown'
+
+        tech_to_color = {tech: CB_PALETTE[i % len(CB_PALETTE)] for i, tech in enumerate(all_techs)}
+        fuel_to_hatch = {fuel: HATCHES[i % len(HATCHES)] for i, fuel in enumerate(all_fuels)}
+
+        # --- Plotting ---
+        fig, axes = plt.subplots(nrows=n_regions, ncols=1, figsize=(12, 4.5 * n_regions), sharey=True)
+        if n_regions == 1:
+            axes = [axes]
+        
+        for idx, region in enumerate(regions):
+            ax = axes[idx]
+            df_capacity = self.residual_capacity[self.residual_capacity['REGION'] == region].copy()
+            df_capacity['PRIMARY OUTPUT FUEL'] = df_capacity['TECHNOLOGY'].map(tech_to_fuel)
+            df_pivot = df_capacity.pivot_table(
+                index='YEAR', columns='TECHNOLOGY', values='VALUE', aggfunc='sum', fill_value=0
+            ).reindex(index=years, columns=all_techs, fill_value=0)
+
+            bottom = np.zeros(len(df_pivot))
+            for i, tech in enumerate(all_techs):
+                hatch = fuel_to_hatch.get(tech_to_fuel[tech], '')
+                bar = ax.bar(
+                    df_pivot.index,
+                    df_pivot[tech],
+                    bottom=bottom,
+                    color=tech_to_color[tech],
+                    label=tech,
+                    hatch=hatch,
+                    edgecolor='black'
+                )
+                bottom += df_pivot[tech].values
+
+            ax.set_ylabel("Installed Capacity (Model Units)")
+            ax.set_title(f"Region: {region}")
+            ax.set_xticks(df_pivot.index)
+            ax.set_xticklabels(df_pivot.index, rotation=0)
+            ax.grid(axis='y', linestyle='--', alpha=0.5)
+            if idx == n_regions - 1:
+                ax.set_xlabel("Year")
+            else:
+                ax.set_xlabel("")
+
+        # --- Formatting ---
+        tech_handles = [
+            mpatches.Patch(facecolor=tech_to_color[tech], edgecolor='black', label=tech)
+            for tech in all_techs
+        ]
+        fuel_handles = [
+            mpatches.Patch(facecolor='white', edgecolor='black', label=fuel, hatch=fuel_to_hatch[fuel])
+            for fuel in all_fuels
+        ]
+        handles = tech_handles + fuel_handles
+        labels = [h.get_label() for h in handles]
+        fig.legend(
+            handles, labels,
+            title="Technology (color) / Output Fuel (hatch)",
+            loc='upper center', bbox_to_anchor=(0.5, 1.04),
+            ncol=min(len(handles), 5), frameon=False, handleheight=2.0, handlelength=3.0
+        )
+
+        plt.tight_layout(rect=[0, 0, 1, 0.97])
+        plt.show()
+
+    def visualize_generation_profile(self, region, fuel, legend=True, ax=None):
         """
         Visualize generation/activity profile across timeslices for technologies.
         Shows how capacity factors and availability affect generation patterns.
         
         :param region: str, Region to visualize
-        :param technology: str or None. Specific technology or all if None
-        :param year: int or None. Specific year or latest if None
+        :param fuel: str, Output fuel to filter technologies
+        :param legend: bool, Show legend
         :param ax: matplotlib axis object or None
         
         Creates visualization showing:
@@ -1047,7 +1143,134 @@ class SupplyComponent(ScenarioComponent):
         - Available capacity (after availability factor)
         - Actual generation potential (after capacity factor)
         """
-        pass
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        import numpy as np
+
+        # --- Styles ---
+        COLOR = ['darkslategrey']
+        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00']
+        HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
+        plt.rcParams.update({
+            'font.size': 14,
+            'text.color': 'black',
+            'axes.labelcolor': 'black',
+            'xtick.color': 'black',
+            'ytick.color': 'black',
+            'font.family': 'sans-serif'
+        })
+
+        # --- Load Data ---
+        self.load()
+        years = self.years
+
+        techs = self.output_activity_ratio[
+            (self.output_activity_ratio['REGION'] == region) &
+            (self.output_activity_ratio['FUEL'] == fuel)
+        ]['TECHNOLOGY'].unique()
+
+        residual_techs = self.residual_capacity[
+            (self.residual_capacity['REGION'] == region) &
+            (self.residual_capacity['TECHNOLOGY'].isin(techs))
+        ]['TECHNOLOGY'].unique()
+        techs_sorted = list(residual_techs) + [t for t in techs if t not in residual_techs]
+        n_techs = len(techs_sorted)
+        if n_techs == 0:
+            print(f"No technologies producing '{fuel}' in region '{region}'.")
+            return
+        
+        # --- Process Data ---
+        timeslices = self.time_axis['TIMESLICE'].unique()
+        daytypes = sorted(self.time_axis['DayType'].unique())
+        timebrackets = sorted(self.time_axis['DailyTimeBracket'].unique())
+        seasons = sorted(self.time_axis['Season'].unique())
+        dt_style_map = {d: CB_PALETTE[i % len(CB_PALETTE)] for i, d in enumerate(daytypes)}
+        tb_hatch_map = {b: HATCHES[i % len(HATCHES)] for i, b in enumerate(timebrackets)}
+
+        # --- Plotting ---
+        fig, axes = plt.subplots(nrows=n_techs, ncols=1, figsize=(12, 7 * n_techs), sharex=True)
+        if n_techs == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten()
+
+        for idx, tech in enumerate(techs_sorted):
+            ax = axes[idx]
+            # Residual capacity per year
+            cap_df = self.residual_capacity[
+                (self.residual_capacity['REGION'] == region) &
+                (self.residual_capacity['TECHNOLOGY'] == tech)
+            ]
+            cap_map = {row['YEAR']: row['VALUE'] for _, row in cap_df.iterrows()}
+            installed = np.array([cap_map.get(y, 0) for y in years])
+
+            # Plot installed capacity as a background bar
+            ax.bar(years, installed, color=COLOR[0], alpha=0.25, label="Installed Capacity")
+
+            # Prepare generation potential stacking by timeslice
+            # For each year, stack by season, then within each season stack by timeslice
+            for y_idx, year in enumerate(years):
+                # Get availability factor
+                af_row = self.availability_factor[
+                    (self.availability_factor['REGION'] == region) &
+                    (self.availability_factor['TECHNOLOGY'] == tech) &
+                    (self.availability_factor['YEAR'] == year)
+                ]
+                availability = af_row['VALUE'].iloc[0] if not af_row.empty else 1.0
+
+                # Get capacity factor profile for this year
+                cf_rows = self.capacity_factor[
+                    (self.capacity_factor['REGION'] == region) &
+                    (self.capacity_factor['TECHNOLOGY'] == tech) &
+                    (self.capacity_factor['YEAR'] == year)
+                ]
+                cf_map = {row['TIMESLICE']: row['VALUE'] for _, row in cf_rows.iterrows()}
+
+                # Stack by season
+                season_bottom = np.zeros(len(seasons))
+                for s_idx, season in enumerate(seasons):
+                    # Filter timeslices for this season
+                    ts_in_season = self.time_axis[self.time_axis['Season'] == season]['TIMESLICE'].unique()
+                    # For each timeslice, get DayType and TimeBracket
+                    bar_bottom = season_bottom[s_idx]
+                    for ts in ts_in_season:
+                        dt = self.time_axis[self.time_axis['TIMESLICE'] == ts]['DayType'].iloc[0]
+                        tb = self.time_axis[self.time_axis['TIMESLICE'] == ts]['DailyTimeBracket'].iloc[0]
+                        cf = cf_map.get(ts, 1.0)
+                        gen_potential = installed[y_idx] * availability * cf
+                        # Plot stacked bar for this timeslice
+                        ax.bar(
+                            year, gen_potential, bottom=bar_bottom,
+                            color=dt_style_map[dt], hatch=tb_hatch_map[tb],
+                            edgecolor='white', linewidth=0.5
+                        )
+                        bar_bottom += gen_potential
+                    season_bottom[s_idx] = bar_bottom
+
+            ax.set_ylabel("Energy Supply (Model Units)")
+            ax.set_title(f"{tech} Installed Capacity + Generation Potential: {region} - {fuel}")
+            ax.set_xticks(years)
+            ax.set_xticklabels(years, rotation=0)
+            ax.grid(axis='y', linestyle='--', alpha=0.5)
+            if idx == n_techs - 1:
+                ax.set_xlabel("Year")
+        
+        # --- Formatting ---
+        legend_handles = []
+        for dt in daytypes:
+            legend_handles.append(mpatches.Patch(facecolor=dt_style_map[dt], edgecolor='white', label=dt))
+        for tb in timebrackets:
+            legend_handles.append(mpatches.Patch(facecolor='white', edgecolor='black', label=tb, hatch=tb_hatch_map[tb]))
+        if legend:
+            fig.legend(
+                handles=legend_handles,
+                title="DayType (color) / TimeBracket (hatch)",
+                loc='upper center', bbox_to_anchor=(0.5, 1.05),
+                ncol=min(len(legend_handles), 6), frameon=False, handleheight=2.0, handlelength=3.0
+            )
+
+        plt.tight_layout(rect=[0, 0, 1, 0.97])
+        plt.show()
 
     def visualize_conversion_efficiency(self, region, technologies=None, ax=None):
         """
