@@ -52,7 +52,7 @@ ALL_SEASONS ALL_DAYS 2025 365
 param default 1 : DepreciationMethod :=
 ;
 param default 0.05 : DiscountRate :=
-REGION1 0
+REGION1 1e-08
 ;
 param default 0.05 : DiscountRateStorage :=
 ;
@@ -71,8 +71,8 @@ REGION1 GAS_CCGT 2025 10
 REGION1 GAS_TURBINE 2025 8
 ;
 param default 0 : InputActivityRatio :=
-REGION1 GAS_CCGT GAS 1 2025 2
-REGION1 GAS_TURBINE GAS 1 2025 2.5
+REGION1 GAS_CCGT GAS 1 2025 1
+REGION1 GAS_TURBINE GAS 1 2025 1
 ;
 set MODE_OF_OPERATION :=
 1
@@ -118,7 +118,7 @@ ALLSEASONS
 set STORAGE :=
 ;
 param default 0 : SpecifiedAnnualDemand :=
-REGION1 ELEC 2025 0.0114155
+REGION1 ELEC 2025 100
 ;
 param default 0 : SpecifiedDemandProfile :=
 REGION1 ELEC ALL_SEASONS_ALL_DAYS_PEAK 2025 0.6
