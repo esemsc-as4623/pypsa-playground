@@ -370,3 +370,6 @@ package.json
 notebooks/demo_output/
 notebooks/test
 notebooks/results
+
+# Data files
+data/

@@ -3,4 +3,3 @@
 """
 PyPSA-OSeMOSYS Comparison Framework package init.
 """
-from .input import ScenarioInputReader

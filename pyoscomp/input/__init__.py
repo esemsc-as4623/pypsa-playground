@@ -4,3 +4,4 @@
 Input data handling submodule for PyPSA-OSeMOSYS Comparison Framework.
 """
 from .reader import ScenarioInputReader
+from .structures import TimesliceStructure

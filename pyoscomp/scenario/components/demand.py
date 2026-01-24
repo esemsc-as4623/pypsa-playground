@@ -1,7 +1,7 @@
 # pyoscomp/scenario/components/demand.py
 
 """
-Demand Component for scneario building in PyPSA-OSeMOSYS Comparison Framework.
+Demand Component for scenario building in PyPSA-OSeMOSYS Comparison Framework.
 Note: this component handles the definition of energy demand / load profiles in the model.
 Demand is represented by AccumulatedAnnualDemand, SpecifiedAnnualDemand, and SpecifiedDemandProfile in OSeMOSYS terminology.
 Demand is represented by Load and Generation (when sign is -1) in PyPSA terminology.
