@@ -23,14 +23,17 @@ class TimesliceResult:
     snapshot_to_timeslice_index: Dict[int, List[int]]
     timeslice_to_snapshot_index: Dict[int, int]
 
-    def validate_coverage(self, year: int) -> bool:
+    def validate_coverage(self) -> bool:
         """Validate that timeslices partition the year completely."""
-        total_hours = sum(
-            ts.duration_hours(year) 
-            for ts in self.timeslices
-        )
-        expected_hours = hours_in_year(year)
-        return abs(total_hours - expected_hours) < TOL
+        for year in self.years:
+            total_hours = sum(
+                ts.duration_hours(year) 
+                for ts in self.timeslices
+            )
+            expected_hours = hours_in_year(year)
+            if abs(total_hours - expected_hours) > TOL:
+                return False
+        return True
     
     def export(self) -> Dict[str, pd.DataFrame]:
         """Generate OSeMOSYS-compatible CSV dataframes."""
