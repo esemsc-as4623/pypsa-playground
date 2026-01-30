@@ -1,3 +1,10 @@
+# Debugging
+- Representation mismatch
+    - check duration of snapshot (with endpoints)
+    - check duration of timeslices (with specific year)
+    - compare
+
+# PyTest
 E. Integration Tests (test_to_timeslices.py)
 By snapshot patterns:
 
