@@ -4,4 +4,4 @@
 Translation layer submodule for PyPSA-OSeMOSYS Comparison Framework.
 """
 
-from .time import TIMEPRECISION, ENDOFDAY, DayType, DailyTimeBracket, Timeslice, to_timeslices, to_snapshots
+from .time import TIMEPRECISION, ENDOFDAY, DayType, DailyTimeBracket, Timeslice, to_timeslices

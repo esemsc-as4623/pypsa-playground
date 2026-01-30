@@ -24,8 +24,9 @@ class DailyTimeBracket:
         if not self.name:
             if self.is_full_day():
                 self.name = "DAY"
-            end_str = "24:00" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H%M')
-            self.name = f"T{self.hour_start.strftime('%H%M')}_{end_str}"
+            else:
+                end_str = "24:00" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H%M')
+                self.name = f"T{self.hour_start.strftime('%H%M')}_{end_str}"
     
     def validate(self):
         """Validate hour_start is before hour_end."""
@@ -127,8 +128,14 @@ class DayType:
     
     def to_dates(self, year: int) -> Tuple[date, date]:
         """Convert to actual dates for a specific year."""
-        start = date(year, self.month_start, self.day_start)
-        # Handle Feb 29 in non-leap years
+        # Handle Feb 29 in non-leap years for start
+        day_start = self.day_start
+        if self.month_start == 2 and self.day_start == 29 and not is_leap_year(year):
+            day_start = 28
+        
+        start = date(year, self.month_start, day_start)
+        
+        # Handle Feb 29 in non-leap years for end
         day_end = self.day_end
         if self.month_end == 2 and self.day_end == 29 and not is_leap_year(year):
             day_end = 28
@@ -138,12 +145,25 @@ class DayType:
     
     def contains_date(self, d: date) -> bool:
         """Check if a date falls within this daytype range."""
+        # Special case: Feb 29 only in non-leap year doesn't contain any date
+        if (self.month_start == 2 and self.day_start == 29 and
+            self.month_end == 2 and self.day_end == 29 and
+            not is_leap_year(d.year)):
+            return False
+        
         start, end = self.to_dates(d.year)
         return start <= d <= end
     
     def duration_days(self, year: int) -> int:
         """Return the number of days covered by this daytype in a given year."""
         assert year >= 1, "Year must be a positive integer."
+        
+        # Special case: Feb 29 only in non-leap year doesn't exist
+        if (self.month_start == 2 and self.day_start == 29 and
+            self.month_end == 2 and self.day_end == 29 and
+            not is_leap_year(year)):
+            return 0
+        
         start, end = self.to_dates(year)
         return (end - start).days + 1  # +1 for closed interval
     
@@ -172,9 +192,9 @@ class Timeslice:
     """
     Represents a specific temporal slice combining season, daytype, and time bracket.
     """
-    season: Optional[str] = "X"  # Placeholder for no season
     daytype: DayType
     dailytimebracket: DailyTimeBracket
+    season: Optional[str] = "X"  # Placeholder for no season
     
     @property
     def name(self) -> str:
