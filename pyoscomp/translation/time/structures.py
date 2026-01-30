@@ -229,7 +229,3 @@ class Timeslice:
     
     def __repr__(self):
         return f"Timeslice({self.name})"
-    
-    # def __len__(self) -> float:
-    #     """Return duration in hours."""
-    #     return self.duration_hours()
