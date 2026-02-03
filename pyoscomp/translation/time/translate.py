@@ -99,8 +99,8 @@ def create_timebrackets_from_times(times: List[time]) -> Set[DailyTimeBracket]:
     
     # Ensure midnight is the first time
     if times[0] != time(0, 0, 0):
-        # if within 1 minute of midnight, assume midnight
-        if timedelta(hours=times[0].hour, minutes=times[0].minute, seconds=times[0].second) <= timedelta(minutes=1):
+        # if within 1 second of midnight, assume midnight
+        if timedelta(hours=times[0].hour, minutes=times[0].minute, seconds=times[0].second) <= timedelta(seconds=1):
             times[0] = time(0, 0, 0)
         else:
             times = [time(0, 0, 0)] + times
@@ -110,9 +110,10 @@ def create_timebrackets_from_times(times: List[time]) -> Set[DailyTimeBracket]:
         
         if i + 1 < len(times):
             end = times[i + 1]
-            # if within 1 minute of ENDOFDAY, assume ENDOFDAY
-            if timedelta(hours=ENDOFDAY.hour - end.hour, minutes=ENDOFDAY.minute - end.minute, seconds=ENDOFDAY.second - end.second) <= timedelta(minutes=1):
+            # if within 1 second of ENDOFDAY, assume ENDOFDAY
+            if timedelta(hours=ENDOFDAY.hour - end.hour, minutes=ENDOFDAY.minute - end.minute, seconds=ENDOFDAY.second - end.second) <= timedelta(seconds=1):
                 end = ENDOFDAY
+                brackets.add(DailyTimeBracket(hour_start=start, hour_end=end))
                 break
         else:
             end = ENDOFDAY
