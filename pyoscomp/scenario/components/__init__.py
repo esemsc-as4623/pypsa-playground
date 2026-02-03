@@ -7,3 +7,12 @@ from .base import ScenarioComponent
 from .topology import TopologyComponent
 from .time import TimeComponent
 from .demand import DemandComponent
+from .supply import SupplyComponent
+
+__all__ = [
+    'ScenarioComponent',
+    'TopologyComponent',
+    'TimeComponent',
+    'DemandComponent',
+    'SupplyComponent'
+]

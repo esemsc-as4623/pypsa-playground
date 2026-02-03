@@ -3,7 +3,7 @@
 from datetime import time
 import calendar
 
-TOL = 1e-8 # tolerance for floating point comparisons
+TOL = 1e-8 # tolerance for floating point comparisons of total hours
 TIMEPRECISION=999999 # microsecond precision for end of day
 ENDOFDAY=time(23, 59, 59, TIMEPRECISION)
 HOURS_PER_YEAR = 8760

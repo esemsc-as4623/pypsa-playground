@@ -11,9 +11,19 @@ from .constants import ENDOFDAY, days_in_month, is_leap_year, hours_in_year
 @dataclass
 class DailyTimeBracket:
     """
-    Represents a time-of-day range (day- and year-agnostic).
-    Uses half-open interval [start, end).
-    ENDOFDAY means "up to and including 23:59:59.999999".
+    Time-of-day range structure (day- and year-agnostic).
+    
+    Represents a bracket within a 24-hour day using half-open interval [start, end),
+    except when end=ENDOFDAY which represents inclusive 23:59:59.999999.
+    
+    Attributes
+    ----------
+    hour_start : time
+        Start time of the bracket (inclusive).
+    hour_end : time
+        End time of the bracket (exclusive, unless ENDOFDAY).
+    name : str, optional
+        Bracket name. Auto-generated if not provided (e.g., "T0600_1200").
     """
     hour_start: time
     hour_end: time
@@ -29,7 +39,14 @@ class DailyTimeBracket:
                 self.name = f"T{self.hour_start.strftime('%H%M')}_{end_str}"
     
     def validate(self):
-        """Validate hour_start is before hour_end."""
+        """
+        Validate hour_start is before hour_end.
+        
+        Raises
+        ------
+        ValueError
+            If hour_start >= hour_end (excluding ENDOFDAY case).
+        """
         if self.hour_end != ENDOFDAY:
             if self.hour_start >= self.hour_end:
                 raise ValueError(
@@ -37,18 +54,44 @@ class DailyTimeBracket:
                 )
 
     def is_full_day(self) -> bool:
-        """Check if the time range covers the full day."""
+        """
+        Check if bracket covers full 24-hour day.
+        
+        Returns
+        -------
+        bool
+            True if bracket is 00:00:00 to 23:59:59.999999.
+        """
         return (self.hour_start == time(0, 0, 0) and 
                 self.hour_end == ENDOFDAY)
     
     def contains_time(self, t: time) -> bool:
-        """Check if a time falls within this bracket [start, end)."""
+        """
+        Check if a time falls within this bracket.
+        
+        Parameters
+        ----------
+        t : time
+            Time to check.
+        
+        Returns
+        -------
+        bool
+            True if t is in [hour_start, hour_end).
+        """
         if self.hour_end == ENDOFDAY:
             return self.hour_start <= t
         return self.hour_start <= t < self.hour_end
     
     def duration_hours(self) -> float:
-        """Return the duration of this bracket in hours."""
+        """
+        Calculate bracket duration in hours.
+        
+        Returns
+        -------
+        float
+            Duration in hours (e.g., 12.0 for noon to midnight).
+        """
         start_seconds = self.hour_start.hour * 3600 + self.hour_start.minute * 60 + self.hour_start.second
         if self.hour_end == ENDOFDAY:
             end_seconds = 24 * 3600
@@ -77,8 +120,23 @@ class DailyTimeBracket:
 @dataclass
 class DayType:
     """
-    Represents a day-of-year range (year-agnostic).
-    Uses closed interval [start, end].
+    Day-of-year range structure (year-agnostic).
+    
+    Represents a date range within a calendar year using closed interval [start, end].
+    Automatically handles leap year adjustments (Feb 29).
+    
+    Attributes
+    ----------
+    month_start : int
+        Start month (1-12).
+    day_start : int
+        Start day (1-31, depending on month).
+    month_end : int
+        End month (1-12).
+    day_end : int
+        End day (1-31, depending on month).
+    name : str, optional
+        DayType name. Auto-generated if not provided (e.g., "01-01 to 03-15").
     """
     month_start: int 
     day_start: int
@@ -127,7 +185,20 @@ class DayType:
                 self.month_end == 12 and self.day_end == 31)
     
     def to_dates(self, year: int) -> Tuple[date, date]:
-        """Convert to actual dates for a specific year."""
+        """
+        Convert to actual date objects for a specific year.
+        
+        Parameters
+        ----------
+        year : int
+            Year to generate dates for.
+        
+        Returns
+        -------
+        Tuple[date, date]
+            (start_date, end_date) for the specified year.
+            Feb 29 adjusted to Feb 28 in non-leap years.
+        """
         # Handle Feb 29 in non-leap years for start
         day_start = self.day_start
         if self.month_start == 2 and self.day_start == 29 and not is_leap_year(year):
@@ -144,7 +215,19 @@ class DayType:
         return start, end
     
     def contains_date(self, d: date) -> bool:
-        """Check if a date falls within this daytype range."""
+        """
+        Check if a date falls within this DayType range.
+        
+        Parameters
+        ----------
+        d : date
+            Date to check.
+        
+        Returns
+        -------
+        bool
+            True if d is within [start, end] for that year.
+        """
         # Special case: Feb 29 only in non-leap year doesn't contain any date
         if (self.month_start == 2 and self.day_start == 29 and
             self.month_end == 2 and self.day_end == 29 and
@@ -155,7 +238,19 @@ class DayType:
         return start <= d <= end
     
     def duration_days(self, year: int) -> int:
-        """Return the number of days covered by this daytype in a given year."""
+        """
+        Calculate number of days in this DayType for a specific year.
+        
+        Parameters
+        ----------
+        year : int
+            Year to calculate for.
+        
+        Returns
+        -------
+        int
+            Number of days (0 if Feb 29 DayType in non-leap year).
+        """
         assert year >= 1, "Year must be a positive integer."
         
         # Special case: Feb 29 only in non-leap year doesn't exist
@@ -190,7 +285,19 @@ class DayType:
 @dataclass
 class Timeslice:
     """
-    Represents a specific temporal slice combining season, daytype, and time bracket.
+    OSeMOSYS temporal slice combining season, day-of-year, and time-of-day.
+    
+    Represents the hierarchical time structure in OSeMOSYS models:
+    Season → DayType → DailyTimeBracket.
+    
+    Attributes
+    ----------
+    daytype : DayType
+        Day-of-year range component.
+    dailytimebracket : DailyTimeBracket
+        Time-of-day range component.
+    season : str, default "X"
+        Season identifier ("X" used as placeholder when no seasons defined).
     """
     daytype: DayType
     dailytimebracket: DailyTimeBracket
@@ -198,7 +305,14 @@ class Timeslice:
     
     @property
     def name(self) -> str:
-        """Generate OSeMOSYS-compatible timeslice name."""
+        """
+        Generate OSeMOSYS-compatible timeslice name.
+        
+        Returns
+        -------
+        str
+            Format: "Season_DayType_DailyTimeBracket" (e.g., "X_01-01 to 03-31_T0600_1200").
+        """
         return f"{self.season}_{self.daytype.name}_{self.dailytimebracket.name}"
     
     @property
@@ -216,18 +330,54 @@ class Timeslice:
         return self.daytype.to_dates(d.year)[1]
     
     def duration_hours(self, year: int) -> float:
-        """Return total duration in hours."""
+        """
+        Calculate total duration of this timeslice in a specific year.
+        
+        Parameters
+        ----------
+        year : int
+            Year to calculate for.
+        
+        Returns
+        -------
+        float
+            Duration in hours (days × hours_per_day).
+        """
         assert year >= 1, "Year must be a positive integer."
         days = self.daytype.duration_days(year)
         hours_per_day = self.dailytimebracket.duration_hours()
         return days * hours_per_day
     
     def year_fraction(self, year: int) -> float:
-        """Return fraction of year (for OSeMOSYS YearSplit parameter)."""
+        """
+        Calculate fraction of year for OSeMOSYS YearSplit parameter.
+        
+        Parameters
+        ----------
+        year : int
+            Year to calculate for.
+        
+        Returns
+        -------
+        float
+            Fraction of total year hours (duration_hours / 8760 or 8784).
+        """
         return self.duration_hours(year) / hours_in_year(year)
     
     def contains_timestamp(self, ts: Union[pd.Timestamp, datetime]) -> bool:
-        """Check if a timestamp falls within this timeslice."""
+        """
+        Check if a timestamp falls within this timeslice.
+        
+        Parameters
+        ----------
+        ts : pd.Timestamp or datetime
+            Timestamp to check.
+        
+        Returns
+        -------
+        bool
+            True if timestamp's date is in daytype AND time is in dailytimebracket.
+        """
         if hasattr(ts, 'to_pydatetime'):
             ts = ts.to_pydatetime()
         

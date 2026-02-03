@@ -6,7 +6,8 @@ Time translation handling submodule for PyPSA-OSeMOSYS Comparison Framework.
 
 from .constants import TOL, TIMEPRECISION, ENDOFDAY, is_leap_year, hours_in_year, days_in_month
 from .structures import DayType, DailyTimeBracket, Timeslice
-from .translate import TimesliceResult, to_timeslices
+from .translate import to_timeslices, to_snapshots
+from .results import TimesliceResult, SnapshotResult
 # from .visualize import 
 
 __all__ = [
@@ -17,7 +18,9 @@ __all__ = [
     'DailyTimeBracket', 
     'Timeslice', 
     'TimesliceResult',
+    'SnapshotResult',
     'to_timeslices',
+    'to_snapshots',
     'is_leap_year',
     'hours_in_year',
     'days_in_month',
