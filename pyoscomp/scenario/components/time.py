@@ -13,8 +13,12 @@ Temporal resolution can be non-uniform, with different slices representing diffe
 import pandas as pd
 import math
 import os
+from decimal import Decimal, getcontext
 
 from .base import ScenarioComponent
+
+# Set decimal precision for exact arithmetic
+getcontext().prec = 28
 
 class TimeComponent(ScenarioComponent):
     """
@@ -48,11 +52,11 @@ class TimeComponent(ScenarioComponent):
         super().__init__(scenario_dir)
 
         # Operational time parameters
-        self.years_df = pd.DataFrame(columns=["YEAR"])
-        self.timeslices_df = pd.DataFrame(columns=["TIMESLICE"])
-        self.seasons_df = pd.DataFrame(columns=["SEASON"])
-        self.daytypes_df = pd.DataFrame(columns=["DAYTYPE"])
-        self.brackets_df = pd.DataFrame(columns=["DAILYTIMEBRACKET"])
+        self.years_df = pd.DataFrame(columns=["VALUE"])
+        self.timeslices_df = pd.DataFrame(columns=["VALUE"])
+        self.seasons_df = pd.DataFrame(columns=["VALUE"])
+        self.daytypes_df = pd.DataFrame(columns=["VALUE"])
+        self.brackets_df = pd.DataFrame(columns=["VALUE"])
 
         self.conversionls_df = pd.DataFrame(columns=["TIMESLICE", "SEASON", "VALUE"])
         self.conversionld_df = pd.DataFrame(columns=["TIMESLICE", "DAYTYPE", "VALUE"])
@@ -82,11 +86,11 @@ class TimeComponent(ScenarioComponent):
         :raises FileNotFoundError: if any required file is missing.
         :raises ValueError: if any file has missing or incorrect columns.
         """
-        self.years_df = self.read_csv("YEAR.csv", ["YEAR"])
-        self.timeslices_df = self.read_csv("TIMESLICE.csv", ["TIMESLICE"])
-        self.seasons_df = self.read_csv("SEASON.csv", ["SEASON"])
-        self.daytypes_df = self.read_csv("DAYTYPE.csv", ["DAYTYPE"])
-        self.brackets_df = self.read_csv("DAILYTIMEBRACKET.csv", ["DAILYTIMEBRACKET"])
+        self.years_df = self.read_csv("YEAR.csv", ["VALUE"])
+        self.timeslices_df = self.read_csv("TIMESLICE.csv", ["VALUE"])
+        self.seasons_df = self.read_csv("SEASON.csv", ["VALUE"])
+        self.daytypes_df = self.read_csv("DAYTYPE.csv", ["VALUE"])
+        self.brackets_df = self.read_csv("DAILYTIMEBRACKET.csv", ["VALUE"])
 
         self.conversionls_df = self.read_csv("Conversionls.csv", ["TIMESLICE", "SEASON", "VALUE"])
         self.conversionld_df = self.read_csv("Conversionld.csv", ["TIMESLICE", "DAYTYPE", "VALUE"])
@@ -124,13 +128,13 @@ class TimeComponent(ScenarioComponent):
         :param brackets: dict {Name: Hours}
         """
         processed_years = self._process_years(years)
-        self.years_df = pd.DataFrame({"YEAR": processed_years})
+        self.years_df = pd.DataFrame({"VALUE": processed_years})
         timeslices, slicehours = self._process_time_structure(processed_years, seasons, daytypes, brackets)
 
-        self.timeslices_df = pd.DataFrame({"TIMESLICE": timeslices})
-        self.seasons_df = pd.DataFrame({"SEASON": list(seasons.keys())})
-        self.daytypes_df = pd.DataFrame({"DAYTYPE": list(daytypes.keys())})
-        self.brackets_df = pd.DataFrame({"DAILYTIMEBRACKET": list(brackets.keys())})
+        self.timeslices_df = pd.DataFrame({"VALUE": timeslices})
+        self.seasons_df = pd.DataFrame({"VALUE": list(seasons.keys())})
+        self.daytypes_df = pd.DataFrame({"VALUE": list(daytypes.keys())})
+        self.brackets_df = pd.DataFrame({"VALUE": list(brackets.keys())})
 
         # 3. Generate Master List (Year -> Timeslice chronological order)
         self.master_time_list = [(y, ts) for y in years for ts in timeslices]
@@ -219,19 +223,18 @@ class TimeComponent(ScenarioComponent):
                     map_ld.append({"TIMESLICE": ts_name, "DAYTYPE": d, "VALUE": 1})
                     map_lh.append({"TIMESLICE": ts_name, "DAILYTIMEBRACKET": b, "VALUE": 1})
 
-                    # Calculations
-                    season_hours = s_val * self.HOURS_PER_YEAR
-                    daytype_hours = d_val * season_hours
-                    slice_hours = b_val * daytype_hours
-                    timeslice_hours.append(slice_hours)
+                    # Calculations using Decimal for exact arithmetic
+                    season_hours = Decimal(str(s_val)) * Decimal(str(self.HOURS_PER_YEAR))
+                    daytype_hours = Decimal(str(d_val)) * season_hours
+                    slice_hours = Decimal(str(b_val)) * daytype_hours
+                    timeslice_hours.append(float(slice_hours))
 
-                    # Calculate YearSplit (TimeSlice as a fraction of Year)
-                    year_split_frac = slice_hours / self.HOURS_PER_YEAR
+                    # Calculate YearSplit (TimeSlice as a fraction of Year) using Decimal
+                    year_split_frac = slice_hours / Decimal(str(self.HOURS_PER_YEAR))
                     for y in years:
-                        year_split_rows.append({"TIMESLICE": ts_name, "YEAR": y, "VALUE": round(year_split_frac, 9)})
+                        year_split_rows.append({"TIMESLICE": ts_name, "YEAR": y, "VALUE": float(year_split_frac)})
                         # Calculate DayTypeSplit (DailyTimeBracket as a fraction of DayType)
-                        # Should ideally correspond to Hours / 24
-                        day_split_rows.append({"DAILYTIMEBRACKET": b, "YEAR": y, "VALUE": round(b_val, 6)})
+                        day_split_rows.append({"DAILYTIMEBRACKET": b, "YEAR": y, "VALUE": float(Decimal(str(b_val)))})
 
         # 4. Validation and normalization for timeslice hours (YearSplit)
         total_hours = sum(timeslice_hours)
@@ -270,12 +273,18 @@ class TimeComponent(ScenarioComponent):
     
     def _normalize(self, data: dict):
         """
-        Normalizes inputs to sum to 1.0.
+        Normalizes inputs to sum to 1.0 using Decimal for exact arithmetic.
         """
-        total = sum(data.values())
+        # Convert to Decimal for exact arithmetic
+        decimal_data = {k: Decimal(str(v)) for k, v in data.items()}
+        total = sum(decimal_data.values())
+        
         if total == 0:
             return {k: 0 for k in data}
-        return {k: v / total for k, v in data.items()}
+        
+        # Perform exact division and convert back to float
+        normalized = {k: float(v / total) for k, v in decimal_data.items()}
+        return normalized
 
     def _sanitize(self, name):
         """
