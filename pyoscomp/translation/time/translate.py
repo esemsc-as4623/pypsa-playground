@@ -1,7 +1,7 @@
 # pyoscomp/translation/time/translate.py
 
 import pandas as pd
-from datetime import time, date, timedelta
+from datetime import time, date, timedelta, datetime
 from typing import List, Set, Dict, Union, Tuple
 from dataclasses import dataclass, field
 
@@ -251,11 +251,20 @@ def create_map(snapshots: Union[pd.DatetimeIndex, pd.Index],
         idx_list, total_timedelta = [], timedelta()
         for j, ts in enumerate(timeslices):
             for y in valid_years:
-                # Get start and end time based on timeslice definition and each valid_year
+                # Skip if timeslice doesn't exist in this year (e.g., Feb 29 in non-leap year)
+                if ts.daytype.duration_days(y) == 0:
+                    continue
+                
+                # Get start and end datetime based on timeslice definition and each valid_year
                 start_date, end_date = ts.daytype.to_dates(y)
                 start_time = pd.Timestamp.combine(start_date, ts.dailytimebracket.hour_start)
                 end_time = pd.Timestamp.combine(end_date, ts.dailytimebracket.hour_end)
-                timeslice_timedelta = end_time - start_time
+                
+                # Calculate timeslice duration: duration_days * duration_hours
+                duration_days = ts.daytype.duration_days(y)
+                duration_hours = ts.dailytimebracket.duration_hours()
+                timeslice_timedelta = timedelta(hours=duration_days * duration_hours)
+                
                 # Check if timeslice is within valid_until period
                 if start_time >= valid_until[i] and end_time <= valid_until[i+1]:
                     idx_list.append((y, j))
@@ -270,7 +279,7 @@ def create_map(snapshots: Union[pd.DatetimeIndex, pd.Index],
         diff_seconds = abs((snapshot_timedelta - total_timedelta).total_seconds())
         if diff_seconds > 1:
             raise ValueError(
-                f"Representation Mismatch! snapshot duration = {snapshot_timedelta}, timeslice duration = {total_timedelta}"
+                f"Mismatch! snapshot duration = {snapshot_timedelta}, timeslice duration = {total_timedelta}"
                 f"\n(year, timeslice) pairs = {[(y, timeslices[j]) for (y, j) in idx_list]}"
                 f"\n(year, index) pairs = {idx_list}"
             )

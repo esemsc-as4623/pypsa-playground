@@ -92,12 +92,12 @@ class TestCreateMapSingleSnapshotScenarios:
             ),
             Timeslice(
                 season="X",
-                daytype=DayType(6, 15, 12, 31),  # From snapshot to end of year
+                daytype=DayType(6, 16, 12, 31),  # From snapshot to end of year
                 dailytimebracket=DailyTimeBracket(time(0, 0, 0), time(12, 0, 0))
             ),
             Timeslice(
                 season="X",
-                daytype=DayType(6, 15, 12, 31),  # From snapshot to end of year
+                daytype=DayType(6, 16, 12, 31),  # From snapshot to end of year
                 dailytimebracket=DailyTimeBracket(time(12, 0, 0), ENDOFDAY)
             ),
         ]
@@ -507,12 +507,17 @@ class TestCreateMapMultiYearScenarios:
         timeslices = [
             Timeslice(
                 season="X",
-                daytype=DayType(6, 1, 6, 30),  # June
+                daytype=DayType(1, 1, 5, 31), # Jan 1 - May 31
                 dailytimebracket=DailyTimeBracket(time(0, 0, 0), ENDOFDAY)
             ),
             Timeslice(
                 season="X",
-                daytype=DayType(7, 1, 12, 31),  # Jul-Dec
+                daytype=DayType(6, 1, 6, 1),  # June 1
+                dailytimebracket=DailyTimeBracket(time(0, 0, 0), ENDOFDAY)
+            ),
+            Timeslice(
+                season="X",
+                daytype=DayType(6, 2, 12, 31),  # Jun 2 - Dec 31
                 dailytimebracket=DailyTimeBracket(time(0, 0, 0), ENDOFDAY)
             ),
         ]
@@ -828,8 +833,10 @@ class TestCreateMapComplexScenarios:
         # 8-hour time brackets
         timebrackets = [
             DailyTimeBracket(time(0, 0, 0), time(8, 0, 0)),
-            DailyTimeBracket(time(8, 0, 0), time(16, 0, 0)),
-            DailyTimeBracket(time(16, 0, 0), ENDOFDAY),
+            DailyTimeBracket(time(8, 0, 0), time(12, 0, 0)),
+            DailyTimeBracket(time(12, 0, 0), time(16, 0, 0)),
+            DailyTimeBracket(time(16, 0, 0), time(20, 0, 0)),
+            DailyTimeBracket(time(20, 0, 0), ENDOFDAY),
         ]
         
         timeslices = []
@@ -908,7 +915,7 @@ class TestCreateMapValidation:
         ]
         
         # Should raise ValueError for representation mismatch
-        with pytest.raises(ValueError, match="Representation Mismatch"):
+        with pytest.raises(ValueError, match="Mismatch"):
             create_map(snapshots, timeslices)
     
     def test_all_snapshots_have_mapping(self):
