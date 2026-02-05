@@ -28,7 +28,7 @@ class TopologyComponent(ScenarioComponent):
         super().__init__(scenario_dir)
 
         # Node parameters
-        self.regions_df = pd.DataFrame(columns=["REGION"])
+        self.regions_df = pd.DataFrame(columns=["VALUE"])
 
     # === Load and Save Methods ===
     def load(self):
@@ -38,7 +38,7 @@ class TopologyComponent(ScenarioComponent):
         :raises FileNotFoundError if any required file is missing.
         :raises ValueError if any file has missing or incorrect columns.
         """
-        self.regions_df = self.read_csv("REGION.csv")
+        self.regions_df = self.read_csv("REGION.csv", ["VALUE"])
 
     def save(self):
         """
@@ -66,4 +66,4 @@ class TopologyComponent(ScenarioComponent):
         else:
             raise ValueError("nodes_input must be an integer or a list of strings.")
         
-        self.regions_df = pd.DataFrame({"REGION": node_list})
+        self.regions_df = pd.DataFrame({"VALUE": node_list})

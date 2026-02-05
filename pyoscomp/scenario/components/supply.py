@@ -62,12 +62,12 @@ class SupplyComponent(ScenarioComponent):
         Raises an error if any prerequisite is missing.
         """
         # Check Time Component
-        years = self.read_csv("YEAR.csv", ["YEAR"])["YEAR"].tolist()
+        years = self.read_csv("YEAR.csv", ["VALUE"])["VALUE"].tolist()
         if not years:
             raise AttributeError("Time component is not defined for this scenario.")
 
         # Check Topology Component
-        regions = self.read_csv("REGION.csv", ["REGION"])["REGION"].tolist()
+        regions = self.read_csv("REGION.csv", ["VALUE"])["VALUE"].tolist()
         if not regions:
             raise AttributeError("Topology component is not defined for this scenario.")
         

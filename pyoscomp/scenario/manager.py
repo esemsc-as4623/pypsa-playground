@@ -10,7 +10,7 @@ DEFAULT_MASTER_LIST_PATH = os.path.join(os.path.dirname(__file__), "..", "scenar
 
 
 # TODO: add support for scenario duplication and modification
-# TODO: add utility method to clone and modify scnearios to create varints
+# TODO: add utility method to clone and modify scenarios to create variants
 class ScenarioManager:
     def __init__(self, tag: str = None, parent_dir: str = "", 
                  config_path=DEFAULT_CONFIG_PATH, master_path=DEFAULT_MASTER_LIST_PATH):
