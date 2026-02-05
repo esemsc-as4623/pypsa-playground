@@ -3,6 +3,7 @@ from .components.time import TimeComponent
 from .components.demand import DemandComponent
 from .components.supply import SupplyComponent
 from .components.economics import EconomicsComponent
+from .components.performance import PerformanceComponent
 
 class Scenario:
     def __init__(self, scenario_dir):
@@ -16,9 +17,8 @@ class Scenario:
         self.time = TimeComponent(scenario_dir)
         self.demand = DemandComponent(scenario_dir)
         self.supply = SupplyComponent(scenario_dir)
-        self.performance = PerformanceComponent(scenario_dir, self.supply)
-        # self.performance = PerformanceComponent(scenario_dir)  # Future component
         self.economics = EconomicsComponent(scenario_dir)
+        # self.performance = PerformanceComponent(scenario_dir, self.supply)
         # self.storage = StorageComponent(scenario_dir)  # Future component
 
     def build(self):

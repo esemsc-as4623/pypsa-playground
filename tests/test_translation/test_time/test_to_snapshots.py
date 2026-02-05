@@ -4,7 +4,6 @@ import pytest
 import pandas as pd
 import tempfile
 import shutil
-from pathlib import Path
 
 from pyoscomp.translation.time.translate import to_snapshots, SnapshotResult
 from pyoscomp.translation.time.constants import hours_in_year
@@ -291,9 +290,10 @@ class TestToSnapshotsFromCSV:
         
         # DaysInDayType.csv (minimal)
         daysindaytype = pd.DataFrame({
-            'SEASON': ['X'],
-            'DAYTYPE': ['D1'],
-            'VALUE': [365]
+            'SEASON': ['X'] * len(years),
+            'DAYTYPE': ['D1'] * len(years),
+            'YEAR': years,
+            'VALUE': [365.25] * len(years)
         })
         daysindaytype.to_csv(f"{scenario_dir}/DaysInDayType.csv", index=False)
     
