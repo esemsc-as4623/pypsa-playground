@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from .constants import TOL, hours_in_year
 from .structures import DayType, DailyTimeBracket, Timeslice
 
+TimesliceMapping = Dict[pd.Timestamp, List[Tuple[int, Timeslice]]]
+
 @dataclass
 class TimesliceResult:
     """
@@ -142,13 +144,13 @@ class TimesliceResult:
         Dict[str, pd.DataFrame]
             Dictionary mapping CSV filenames (without .csv extension) to DataFrames:
             
-            - 'YEAR': Years (columns: VALUE)
-            - 'SEASON': Seasons (columns: VALUE)
-            - 'DAYTYPE': Day types (columns: VALUE)
-            - 'DAILYTIMEBRACKET': Time brackets (columns: VALUE)
-            - 'TIMESLICE': Timeslices (columns: VALUE)
-            - 'YearSplit': Timeslice fractions (columns: TIMESLICE, YEAR, VALUE)
-            - 'DaySplit': Daily bracket fractions (columns: TIMESLICE, YEAR, VALUE)
+            - 'YEAR': DataFrame with columns ['VALUE']
+            - 'SEASON': DataFrame with columns ['VALUE']
+            - 'DAYTYPE': DataFrame with columns ['VALUE']
+            - 'DAILYTIMEBRACKET': DataFrame with columns ['VALUE']
+            - 'TIMESLICE': DataFrame with columns ['VALUE']
+            - 'YearSplit': DataFrame with columns ['TIMESLICE', 'YEAR', 'VALUE']
+            - 'DaySplit': DataFrame with columns ['TIMESLICE', 'YEAR', 'VALUE']
         
         Examples
         --------
@@ -200,6 +202,27 @@ class TimesliceResult:
         result[f'DaySplit'] = pd.DataFrame(day_split_rows)
         
         return result
+    
+    def to_csv(self, output_dir: str) -> None:
+        """
+        Export all DataFrames to CSV files in output directory.
+        
+        Parameters
+        ----------
+        output_dir : str
+            Directory to write CSV files.
+        
+        Examples
+        --------
+        >>> result.to_csv('output/scenario1/')
+        # Creates: output/scenario1/YEAR.csv, output/scenario1/TIMESLICE.csv, etc.
+        """
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for name, df in self.export().items():
+            filepath = os.path.join(output_dir, f"{name}.csv")
+            df.to_csv(filepath, index=False)
 
 
 @dataclass

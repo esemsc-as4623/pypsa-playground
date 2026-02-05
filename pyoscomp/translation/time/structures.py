@@ -53,6 +53,34 @@ class DailyTimeBracket:
                     f"hour_start ({self.hour_start}) must be before hour_end ({self.hour_end})"
                 )
 
+    @classmethod
+    def from_string(cls, time_str: str) -> 'DailyTimeBracket':
+        """
+        Create DailyTimeBracket from string like "06:00-18:00".
+        
+        Parameters
+        ----------
+        time_str : str
+            Time range in format "HH:MM-HH:MM"
+        
+        Returns
+        -------
+        DailyTimeBracket
+        
+        Examples
+        --------
+        >>> bracket = DailyTimeBracket.from_string("06:00-18:00")
+        >>> bracket.duration_hours()
+        12.0
+        """
+        start_str, end_str = time_str.split('-')
+        hour_start = time.fromisoformat(start_str)
+        if end_str == "24:00":
+            hour_end = ENDOFDAY
+        else:
+            hour_end = time.fromisoformat(end_str)
+        return cls(hour_start=hour_start, hour_end=hour_end)
+
     def is_full_day(self) -> bool:
         """
         Check if bracket covers full 24-hour day.
@@ -98,7 +126,7 @@ class DailyTimeBracket:
         else:
             end_seconds = self.hour_end.hour * 3600 + self.hour_end.minute * 60 + self.hour_end.second
         return (end_seconds - start_seconds) / 3600
-    
+
     def __hash__(self):
         """Compute hash based on start and end times."""
         return hash((self.hour_start, self.hour_end))
@@ -115,6 +143,9 @@ class DailyTimeBracket:
         if not isinstance(other, DailyTimeBracket):
             return NotImplemented
         return self.hour_start < other.hour_start
+    
+    def __repr__(self):
+        return f"DailyTimeBracket({self.hour_start!r}, {self.hour_end!r}, name={self.name!r})"
 
 
 @dataclass
@@ -170,6 +201,12 @@ class DayType:
         if not (1 <= self.day_end <= max_day_end):
             raise ValueError(f"day_end must be 1-{max_day_end} for month {self.month_end}")
         
+        # Validate that start is not after end (allowing for same day)
+        if self.month_start == self.month_end and self.day_start > self.day_end:
+            raise ValueError(
+                f"For the same month, day_start ({self.day_start}) must not be after day_end ({self.day_end})"
+            )
+        
         # Prevent year-wrapping intervals
         start_ordinal = (self.month_start, self.day_start)
         end_ordinal = (self.month_end, self.day_end)
@@ -178,7 +215,39 @@ class DayType:
                 f"Year-wrapping intervals not supported. "
                 f"Start {start_ordinal} > End {end_ordinal}"
             )
-        
+    
+    @classmethod
+    def from_string(cls, s: str) -> 'DayType':
+        """
+        Create DayType from string like "03-15 to 06-30" or "01-01 to 12-31".
+    
+        Parameters
+        ----------
+        s : str
+            String in format "MM-DD to MM-DD".
+    
+        Returns
+        -------
+        DayType
+            DayType instance for the given range.
+    
+        Examples
+        --------
+        >>> DayType.from_string("03-15 to 06-30")
+        DayType(3-15 to 6-30)
+        >>> DayType.from_string("01-01 to 12-31")
+        DayType(1-1 to 12-31)
+        """
+        try:
+            left, right = s.split('to')
+            left = left.strip()
+            right = right.strip()
+            m1, d1 = map(int, left.split('-'))
+            m2, d2 = map(int, right.split('-'))
+        except Exception as e:
+            raise ValueError(f"Invalid DayType string: '{s}'. Expected format 'MM-DD to MM-DD'.") from e
+        return cls(month_start=m1, day_start=d1, month_end=m2, day_end=d2)
+    
     def is_full_year(self) -> bool:
         """Check if the day range covers the full year."""
         return (self.month_start == 1 and self.day_start == 1 and 
@@ -281,6 +350,9 @@ class DayType:
             return NotImplemented
         return (self.month_start, self.day_start) < (other.month_start, other.day_start)
     
+    def __repr__(self):
+        return f"DayType({self.month_start}-{self.day_start} to {self.month_end}-{self.day_end})"
+
 
 @dataclass
 class Timeslice:
