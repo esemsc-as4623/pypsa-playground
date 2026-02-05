@@ -38,7 +38,7 @@ class TopologyComponent(ScenarioComponent):
         :raises FileNotFoundError if any required file is missing.
         :raises ValueError if any file has missing or incorrect columns.
         """
-        self.regions_df = self.read_csv("REGION.csv", ["VALUE"])
+        self.regions_df = self.read_csv("REGION.csv")
 
     def save(self):
         """

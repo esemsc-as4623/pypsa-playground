@@ -86,18 +86,18 @@ class TimeComponent(ScenarioComponent):
         :raises FileNotFoundError: if any required file is missing.
         :raises ValueError: if any file has missing or incorrect columns.
         """
-        self.years_df = self.read_csv("YEAR.csv", ["VALUE"])
-        self.timeslices_df = self.read_csv("TIMESLICE.csv", ["VALUE"])
-        self.seasons_df = self.read_csv("SEASON.csv", ["VALUE"])
-        self.daytypes_df = self.read_csv("DAYTYPE.csv", ["VALUE"])
-        self.brackets_df = self.read_csv("DAILYTIMEBRACKET.csv", ["VALUE"])
+        self.years_df = self.read_csv("YEAR.csv")
+        self.timeslices_df = self.read_csv("TIMESLICE.csv")
+        self.seasons_df = self.read_csv("SEASON.csv")
+        self.daytypes_df = self.read_csv("DAYTYPE.csv")
+        self.brackets_df = self.read_csv("DAILYTIMEBRACKET.csv")
 
-        self.conversionls_df = self.read_csv("Conversionls.csv", ["TIMESLICE", "SEASON", "VALUE"])
-        self.conversionld_df = self.read_csv("Conversionld.csv", ["TIMESLICE", "DAYTYPE", "VALUE"])
-        self.conversionlh_df = self.read_csv("Conversionlh.csv", ["TIMESLICE", "DAILYTIMEBRACKET", "VALUE"])
-        self.yearsplit_df = self.read_csv("YearSplit.csv", ["TIMESLICE", "YEAR", "VALUE"])
-        self.daysplit_df = self.read_csv("DaySplit.csv", ["DAILYTIMEBRACKET", "YEAR", "VALUE"])
-        self.daysindaytype_df = self.read_csv("DaysInDayType.csv", ["SEASON", "DAYTYPE", "VALUE"])
+        self.conversionls_df = self.read_csv("Conversionls.csv")
+        self.conversionld_df = self.read_csv("Conversionld.csv")
+        self.conversionlh_df = self.read_csv("Conversionlh.csv")
+        self.yearsplit_df = self.read_csv("YearSplit.csv")
+        self.daysplit_df = self.read_csv("DaySplit.csv")
+        self.daysindaytype_df = self.read_csv("DaysInDayType.csv")
 
     def save(self):
         """

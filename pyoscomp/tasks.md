@@ -25,20 +25,13 @@ Scenario.build() → Translator.translate() → Runner.run()
 
 **Fix:** Define a clear `ScenarioData` interface that both scenario building and translation consume.
 
-#### 1.2 Inconsistent Column Naming
-- `YEAR.csv` uses `VALUE` column in `manager.py` but `YEAR` column in `supply.py` and `demand.py`
-- `REGION.csv` uses `VALUE` column in creation but `REGION` column in component prerequisites
-- This causes silent failures when loading CSVs with mismatched expectations
-
-**Fix:** Standardize on OSeMOSYS conventions (`VALUE` for sets, explicit column names for params) and validate consistently.
-
-#### 1.3 Missing Economics and Performance Components
+#### 1.2 Missing Economics and Performance Components
 - [economics.py](pyoscomp/scenario/components/economics.py) - **EMPTY**
 - [performance.py](pyoscomp/scenario/components/performance.py) - **EMPTY**
 
 These are core to `simple.ipynb` (capital_costs, variable_costs, discount_rate, efficiency) but have no implementation.
 
-#### 1.4 Component Dependencies Not Enforced
+#### 1.3 Component Dependencies Not Enforced
 Components claim prerequisites (e.g., `demand.py` requires Time and Topology) but:
 - No formal dependency injection or ordering mechanism
 - `Scenario.build()` doesn't validate component readiness

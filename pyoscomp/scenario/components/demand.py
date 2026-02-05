@@ -59,12 +59,12 @@ class DemandComponent(ScenarioComponent):
         Raises an error if any prerequisite is missing.
         """
         # Check Time Component
-        years = self.read_csv("YEAR.csv", ["VALUE"])["VALUE"].tolist()
+        years = self.read_csv("YEAR.csv")["VALUE"].tolist()
         if not years:
             raise AttributeError("Time component is not defined for this scenario.")
 
         # Check Topology Component
-        regions = self.read_csv("REGION.csv", ["VALUE"])["VALUE"].tolist()
+        regions = self.read_csv("REGION.csv")["VALUE"].tolist()
         if not regions:
             raise AttributeError("Topology component is not defined for this scenario.")
         
@@ -97,7 +97,7 @@ class DemandComponent(ScenarioComponent):
         Uses read_csv from base class. Updates DataFrames and defined_fuels.
         """
         # Annual
-        df = self.read_csv("SpecifiedAnnualDemand.csv", ["REGION", "FUEL", "YEAR", "VALUE"])
+        df = self.read_csv("SpecifiedAnnualDemand.csv")
         self.annual_demand_df = df
         self.defined_fuels = set(zip(df["REGION"], df["FUEL"]))
 
@@ -106,7 +106,7 @@ class DemandComponent(ScenarioComponent):
         self.profile_demand_df = df
 
         # Accumulated
-        df = self.read_csv("AccumulatedAnnualDemand.csv", ["REGION", "FUEL", "YEAR", "VALUE"])
+        df = self.read_csv("AccumulatedAnnualDemand.csv")
         self.accumulated_demand_df = df
 
     def save(self):

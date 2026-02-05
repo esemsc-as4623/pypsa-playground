@@ -38,11 +38,11 @@ class EconomicsComponent(ScenarioComponent):
     
 	def check_prerequisites(self):
 		"""Check that Time and Topology components exist."""
-		years = self.read_csv("YEAR.csv", ["VALUE"])["VALUE"].tolist()
+		years = self.read_csv("YEAR.csv")["VALUE"].tolist()
 		if not years:
 			raise AttributeError("Time component is not defined for this scenario.")
         
-		regions = self.read_csv("REGION.csv", ["VALUE"])["VALUE"].tolist()
+		regions = self.read_csv("REGION.csv")["VALUE"].tolist()
 		if not regions:
 			raise AttributeError("Topology component is not defined for this scenario.")
         
@@ -50,10 +50,10 @@ class EconomicsComponent(ScenarioComponent):
     
 	def load(self):
 		"""Load all economics parameter CSV files."""
-		self.discount_rate_df = self.read_csv("DiscountRate.csv", ["REGION", "VALUE"])
-		self.capital_cost_df = self.read_csv("CapitalCost.csv", ["REGION", "TECHNOLOGY", "YEAR", "VALUE"])
-		self.variable_cost_df = self.read_csv("VariableCost.csv", ["REGION", "TECHNOLOGY", "MODE_OF_OPERATION", "YEAR", "VALUE"])
-		self.fixed_cost_df = self.read_csv("FixedCost.csv", ["REGION", "TECHNOLOGY", "YEAR", "VALUE"])
+		self.discount_rate_df = self.read_csv("DiscountRate.csv")
+		self.capital_cost_df = self.read_csv("CapitalCost.csv")
+		self.variable_cost_df = self.read_csv("VariableCost.csv")
+		self.fixed_cost_df = self.read_csv("FixedCost.csv")
     
 	def save(self):
 		"""Save all economics parameter DataFrames to CSV."""

@@ -5,38 +5,50 @@ Base class for scenario components in PyPSA-OSeMOSYS Comparison Framework.
 """
 import os
 import shutil
+import importlib.resources
 import pandas as pd
-from abc import ABC
+from abc import ABC, abstractmethod
+
+from ..validation.schemas import SchemaRegistry, validate_csv
+
 
 class ScenarioComponent(ABC):
     def __init__(self, scenario_dir: str):
         self.scenario_dir = scenario_dir
+        # Load the schema from the package
+        with importlib.resources.path("pyoscomp", "osemosys_config.yaml") as schema_path:
+            self.schema = SchemaRegistry(str(schema_path))
+
+    def _get_schema_name(self, filename: str) -> str:
+        """
+        Infer OSeMOSYS parameter/set/result name from filename (e.g., 'YEAR.csv' -> 'YEAR').
+        """
+        return os.path.splitext(os.path.basename(filename))[0]
 
     def write_dataframe(self, filename: str, df: pd.DataFrame):
         """
-        Writes a pandas DataFrame to a CSV in the scenario directory.
+        Writes a pandas DataFrame to a CSV in the scenario directory, with schema validation.
         :param filename: Name of the CSV file
         :param df: DataFrame to write
         """
+        schema_name = self._get_schema_name(filename)
+        validate_csv(schema_name, df, self.schema)
         file_path = os.path.join(self.scenario_dir, filename)
         df.to_csv(file_path, index=False)
 
-    def read_csv(self, filename, expected_columns=[]) -> pd.DataFrame:
+    def read_csv(self, filename: str) -> pd.DataFrame:
         """
-        Helper to read a CSV file and validate columns.
-        Returns DataFrame. Raises informative error if file missing or columns mismatch.
+        Helper to read a CSV file and validate against the OSeMOSYS schema.
+        Returns DataFrame. Raises informative error if file missing or schema mismatch.
         :param filename: Name of the CSV file
-        :param expected_columns: List of expected column names
         :return: DataFrame with CSV contents
         """
         path = os.path.join(self.scenario_dir, filename)
         if not os.path.exists(path):
             raise FileNotFoundError(f"Required parameter file '{filename}' not found in scenario directory.")
         df = pd.read_csv(path)
-        if len(expected_columns) > 0:
-            missing = [col for col in expected_columns if col not in df.columns]
-            if missing:
-                raise ValueError(f"File '{filename}' is missing columns: {missing}. Found columns: {list(df.columns)}")
+        schema_name = self._get_schema_name(filename)
+        validate_csv(schema_name, df, self.schema)
         return df
     
     def add_to_dataframe(self, existing_df: pd.DataFrame, new_records: list,
@@ -89,3 +101,12 @@ class ScenarioComponent(ABC):
                         shutil.copy2(s, d)
         else:
             shutil.copytree(source_scenario, target_scenario)
+
+    # === Load and Save Methods ===
+    @abstractmethod
+    def load(self):
+        pass
+
+    @abstractmethod
+    def save(self):
+        pass

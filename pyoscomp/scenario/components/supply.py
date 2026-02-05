@@ -62,12 +62,12 @@ class SupplyComponent(ScenarioComponent):
         Raises an error if any prerequisite is missing.
         """
         # Check Time Component
-        years = self.read_csv("YEAR.csv", ["VALUE"])["VALUE"].tolist()
+        years = self.read_csv("YEAR.csv")["VALUE"].tolist()
         if not years:
             raise AttributeError("Time component is not defined for this scenario.")
 
         # Check Topology Component
-        regions = self.read_csv("REGION.csv", ["VALUE"])["VALUE"].tolist()
+        regions = self.read_csv("REGION.csv")["VALUE"].tolist()
         if not regions:
             raise AttributeError("Topology component is not defined for this scenario.")
         
@@ -100,32 +100,32 @@ class SupplyComponent(ScenarioComponent):
         Uses read_csv from base class. Updates DataFrames and defined_tech.
         """
         # Capacity to Activity
-        df = self.read_csv("CapacityToActivityUnit.csv", ["REGION", "TECHNOLOGY", "VALUE"])
+        df = self.read_csv("CapacityToActivityUnit.csv")
         self.capacity_to_activity_unit = df
         self.defined_tech = set(zip(df['REGION'], df['TECHNOLOGY']))
 
         # Capacity Factor
-        df = self.read_csv("CapacityFactor.csv", ["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR", "VALUE"])
+        df = self.read_csv("CapacityFactor.csv")
         self.capacity_factor = df
 
         # Availability Factor
-        df = self.read_csv("AvailabilityFactor.csv", ["REGION", "TECHNOLOGY", "YEAR", "VALUE"])
+        df = self.read_csv("AvailabilityFactor.csv")
         self.availability_factor = df
 
         # Operational Life
-        df = self.read_csv("OperationalLife.csv", ["REGION", "TECHNOLOGY", "VALUE"])
+        df = self.read_csv("OperationalLife.csv")
         self.operational_life = df
 
         # Residual Capacity
-        df = self.read_csv("ResidualCapacity.csv", ["REGION", "TECHNOLOGY", "YEAR", "VALUE"])
+        df = self.read_csv("ResidualCapacity.csv")
         self.residual_capacity = df
 
         # Input Activity Ratio
-        df = self.read_csv("InputActivityRatio.csv", ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"])
+        df = self.read_csv("InputActivityRatio.csv")
         self.input_activity_ratio = df
 
         # Output Activity Ratio
-        df = self.read_csv("OutputActivityRatio.csv", ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"])
+        df = self.read_csv("OutputActivityRatio.csv")
         self.output_activity_ratio = df
 
     def save(self):

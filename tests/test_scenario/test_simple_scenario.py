@@ -3,10 +3,7 @@ Integration test: Reproduce simple.ipynb scenario using pyoscomp API.
 """
 import pytest
 import pandas as pd
-import numpy as np
 import os
-import tempfile
-import shutil
 
 from pyoscomp.scenario.components.topology import TopologyComponent
 from pyoscomp.scenario.components.time import TimeComponent
