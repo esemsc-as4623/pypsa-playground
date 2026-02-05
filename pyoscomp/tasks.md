@@ -127,17 +127,6 @@ supply.add_technology(...).with_conversion(...).with_bounds(...).build()
 
 ## Prioritized Task List
 
-### Priority 1: Foundation (Must Complete First)
-*Goal: Establish working end-to-end pipeline for simplest case*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P1.1** | Fix CSV column naming inconsistency | Standardize all CSVs to use OSeMOSYS conventions. Sets use `VALUE`, params use explicit names. Update all readers/writers. | `scenario/components/*.py`, `scenario/manager.py` |
-| **P1.2** | Implement EconomicsComponent (minimal) | Support `DiscountRate`, `CapitalCost`, `VariableCost`, `FixedCost` matching simple.ipynb | `scenario/components/economics.py` |
-| **P1.3** | Implement PerformanceComponent (minimal) | Support `OperationalLife`, `CapacityToActivityUnit`, `InputActivityRatio`, `OutputActivityRatio` matching simple.ipynb. **Note:** Currently split across supply.py - decide on ownership. | `scenario/components/performance.py`, refactor `supply.py` |
-| **P1.4** | Create integration test for simple.ipynb scenario | Programmatically build the same scenario as simple.ipynb using pyoscomp, verify CSV outputs match | `tests/test_scenario/test_simple_scenario.py` |
-| **P1.5** | Document component ownership | Create clear table of which OSeMOSYS parameters belong to which component. Resolve overlaps. | `docs/component_mapping.md` |
-
 ### Priority 2: Validation & Robustness
 *Goal: Prevent silent failures and catch errors early*
 
