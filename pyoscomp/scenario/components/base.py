@@ -9,22 +9,50 @@ import importlib.resources
 import pandas as pd
 from abc import ABC, abstractmethod
 
-from ..validation.schemas import SchemaRegistry, validate_csv
+from tests.test_scenario.test_validation.test_schema import schema
 
+from ..validation.schemas import SchemaRegistry, validate_csv
 
 class ScenarioComponent(ABC):
     def __init__(self, scenario_dir: str):
         self.scenario_dir = scenario_dir
         # Load the schema from the package
-        with importlib.resources.path("pyoscomp", "osemosys_config.yaml") as schema_path:
-            self.schema = SchemaRegistry(str(schema_path))
+        schema_path = importlib.resources.files("pyoscomp").joinpath("osemosys_config.yaml")
+        self.schema = SchemaRegistry(str(schema_path))
 
     def _get_schema_name(self, filename: str) -> str:
         """
         Infer OSeMOSYS parameter/set/result name from filename (e.g., 'YEAR.csv' -> 'YEAR').
         """
         return os.path.splitext(os.path.basename(filename))[0]
-
+    
+    def init_dataframe(self, schema_name: str) -> pd.DataFrame:
+        """
+        Initialize an empty DataFrame with columns based on the schema for the given parameter/set/result.
+        :param schema_name: Name of the schema to use for columns
+        :return: Empty DataFrame with schema columns
+        """
+        cols = self.schema.get_csv_columns(schema_name)
+        dtype = self.schema.get_dtype(schema_name)
+        # Build dtype mapping
+        dtype_map = {}
+        for col in cols:
+            if col == 'VALUE':
+                if dtype == 'int':
+                    dtype_map[col] = 'int'
+                elif dtype == 'float':
+                    dtype_map[col] = 'float'
+                elif dtype == 'str':
+                    dtype_map[col] = 'str'
+                else:
+                    dtype_map[col] = 'object'
+            else:
+                # Index columns: default to str
+                dtype_map[col] = 'str'
+        # Create empty DataFrame with correct dtypes
+        df = pd.DataFrame({col: pd.Series(dtype=dtype_map[col]) for col in cols})
+        return df
+    
     def write_dataframe(self, filename: str, df: pd.DataFrame):
         """
         Writes a pandas DataFrame to a CSV in the scenario directory, with schema validation.

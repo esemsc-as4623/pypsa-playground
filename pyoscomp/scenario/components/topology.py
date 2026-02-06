@@ -28,7 +28,7 @@ class TopologyComponent(ScenarioComponent):
         super().__init__(scenario_dir)
 
         # Node parameters
-        self.regions_df = pd.DataFrame(columns=["VALUE"])
+        self.regions_df = self.init_dataframe("REGION")
 
     # === Load and Save Methods ===
     def load(self):

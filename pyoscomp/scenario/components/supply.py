@@ -41,13 +41,13 @@ class SupplyComponent(ScenarioComponent):
         self.time_axis = self.load_time_axis()
 
         # Supply parameters
-        self.capacity_to_activity_unit = pd.DataFrame(columns=["REGION", "TECHNOLOGY", "VALUE"])
-        self.residual_capacity = pd.DataFrame(columns=["REGION", "TECHNOLOGY", "YEAR", "VALUE"])
-        self.input_activity_ratio = pd.DataFrame(columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"])
-        self.output_activity_ratio = pd.DataFrame(columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"])
-        self.capacity_factor = pd.DataFrame(columns=["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR", "VALUE"])
-        self.availability_factor = pd.DataFrame(columns=["REGION", "TECHNOLOGY", "YEAR", "VALUE"])
-        self.operational_life = pd.DataFrame(columns=["REGION", "TECHNOLOGY", "VALUE"])
+        self.capacity_to_activity_unit = self.init_dataframe("CapacityToActivityUnit")
+        self.residual_capacity = self.init_dataframe("ResidualCapacity")
+        self.input_activity_ratio = self.init_dataframe("InputActivityRatio")
+        self.output_activity_ratio = self.init_dataframe("OutputActivityRatio")
+        self.capacity_factor = self.init_dataframe("CapacityFactor")
+        self.availability_factor = self.init_dataframe("AvailabilityFactor")
+        self.operational_life = self.init_dataframe("OperationalLife")
 
         # Tracking
         self.defined_tech = set()                    # (Region, Technology)

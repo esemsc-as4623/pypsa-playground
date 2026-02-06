@@ -113,8 +113,11 @@ def validate_csv(name: str, df: pd.DataFrame, schema: SchemaRegistry):
 		# Params/results: VALUE column type
 		if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
 			raise SchemaError(f"Param/result '{name}' VALUE column must be integer type.")
-		if dtype == 'float' and not pd.api.types.is_float_dtype(df['VALUE']):
-			raise SchemaError(f"Param/result '{name}' VALUE column must be float type.")
+		if dtype == 'float':
+			if pd.api.types.is_integer_dtype(df['VALUE']):
+				df['VALUE'] = df['VALUE'].astype('float')
+			if not pd.api.types.is_float_dtype(df['VALUE']):
+				raise SchemaError(f"Param/result '{name}' VALUE column must be float type.")
 		if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
 			raise SchemaError(f"Param/result '{name}' VALUE column must be string type.")
 	# Check for NaNs in required columns

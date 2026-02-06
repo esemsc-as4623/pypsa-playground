@@ -44,9 +44,9 @@ class DemandComponent(ScenarioComponent):
         self.time_axis = self.load_time_axis()
 
         # Demand parameters
-        self.annual_demand_df = pd.DataFrame(columns=["REGION", "FUEL", "YEAR", "VALUE"])
-        self.profile_demand_df = pd.DataFrame(columns=["REGION", "FUEL", "TIMESLICE", "YEAR", "VALUE"])
-        self.accumulated_demand_df = pd.DataFrame(columns=["REGION", "FUEL", "YEAR", "VALUE"])
+        self.annual_demand_df = self.init_dataframe("SpecifiedAnnualDemand")
+        self.profile_demand_df = self.init_dataframe("SpecifiedDemandProfile")
+        self.accumulated_demand_df = self.init_dataframe("AccumulatedAnnualDemand")
 
         # Tracking
         self.defined_fuels = set()        # (Region, Fuel)

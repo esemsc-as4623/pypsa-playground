@@ -7,8 +7,6 @@ Temporal resolution includes Years and Timeslices in OSeMOSYS terminology.
 Timeslices are combinations of Seasons, DayTypes, and Daily Time Brackets.
 Temporal resolution is referred to as Snapshots in PyPSA terminology.
 Temporal resolution can be non-uniform, with different slices representing different numbers or fractions of hours.
-
-# NOTE: OSeMOSYS assumes 365 days per year.
 """
 import pandas as pd
 import math
@@ -16,6 +14,7 @@ import os
 from decimal import Decimal, getcontext
 
 from .base import ScenarioComponent
+from ...constants import TOL, hours_in_year, days_in_year
 
 # Set decimal precision for exact arithmetic
 getcontext().prec = 28
@@ -52,18 +51,18 @@ class TimeComponent(ScenarioComponent):
         super().__init__(scenario_dir)
 
         # Operational time parameters
-        self.years_df = pd.DataFrame(columns=["VALUE"])
-        self.timeslices_df = pd.DataFrame(columns=["VALUE"])
-        self.seasons_df = pd.DataFrame(columns=["VALUE"])
-        self.daytypes_df = pd.DataFrame(columns=["VALUE"])
-        self.brackets_df = pd.DataFrame(columns=["VALUE"])
+        self.years_df = self.init_dataframe("YEAR")
+        self.timeslices_df = self.init_dataframe("TIMESLICE")
+        self.seasons_df = self.init_dataframe("SEASON")
+        self.daytypes_df = self.init_dataframe("DAYTYPE")
+        self.brackets_df = self.init_dataframe("DAILYTIMEBRACKET")
 
-        self.conversionls_df = pd.DataFrame(columns=["TIMESLICE", "SEASON", "VALUE"])
-        self.conversionld_df = pd.DataFrame(columns=["TIMESLICE", "DAYTYPE", "VALUE"])
-        self.conversionlh_df = pd.DataFrame(columns=["TIMESLICE", "DAILYTIMEBRACKET", "VALUE"])
-        self.yearsplit_df = pd.DataFrame(columns=["TIMESLICE", "YEAR", "VALUE"])
-        self.daysplit_df = pd.DataFrame(columns=["DAILYTIMEBRACKET", "YEAR", "VALUE"])
-        self.daysindaytype_df = pd.DataFrame(columns=["SEASON", "DAYTYPE", "VALUE"])
+        self.conversionls_df = self.init_dataframe("Conversionls")
+        self.conversionld_df = self.init_dataframe("Conversionld")
+        self.conversionlh_df = self.init_dataframe("Conversionlh")
+        self.yearsplit_df = self.init_dataframe("YearSplit")
+        self.daysplit_df = self.init_dataframe("DaySplit")
+        self.daysindaytype_df = self.init_dataframe("DaysInDayType")
 
         # Tracking
         self.master_time_list = []  # List of tuples (Year, Timeslice)
@@ -71,12 +70,10 @@ class TimeComponent(ScenarioComponent):
         self.timeslice_name_map = {}  # Dict TIMESLICE -> (Season, DayType, DailyTimeBracket)
 
         # Constants for physical time validation
-        self.HOURS_PER_YEAR = 8760
         self.HOURS_PER_DAY = 24
-        self.DAYS_PER_YEAR = 365
 
         # Constant for validation
-        self.TOL = 1e-6
+        self.TOL = TOL
 
     # === Load and Save Methods ===
     def load(self):
@@ -138,7 +135,7 @@ class TimeComponent(ScenarioComponent):
 
         # 3. Generate Master List (Year -> Timeslice chronological order)
         self.master_time_list = [(y, ts) for y in years for ts in timeslices]
-        self.master_time_hours = slicehours * len(years)
+        self.master_time_hours = slicehours
 
     # === Internal Logic Helpers ===
     def _process_years(self, years_input):
@@ -178,14 +175,14 @@ class TimeComponent(ScenarioComponent):
             raise ValueError("Season, daytype, and bracket weights must all be non-zero.")
 
         # Warn if user input is far from expected
-        if abs(sum(seasons.values()) - self.DAYS_PER_YEAR) > 1e-3:
-            print(f"WARNING: Sum of season days is {sum(seasons.values())}, expected {self.DAYS_PER_YEAR}.\n"
+        if abs(sum(seasons.values()) - days_in_year(years[0])) > 1e-3:
+            print(f"WARNING: Sum of season days is {sum(seasons.values())}, expected {days_in_year(years[0])}.\n"
                   "Season values will be normalized to sum to 1.0. This means the relative proportions are preserved, "
-                  "but the absolute mapping to calendar days may be lost. If you want physical accuracy, ensure your input sums to 365.")
+                  "but the absolute mapping to calendar days may be lost.")
         if abs(sum(brackets.values()) - self.HOURS_PER_DAY) > 1e-3:
             print(f"WARNING: Sum of bracket hours is {sum(brackets.values())}, expected {self.HOURS_PER_DAY}.\n"
                   "Bracket values will be normalized to sum to 1.0. This means the relative proportions are preserved, "
-                  "but the absolute mapping to hours in a day may be lost. If you want physical accuracy, ensure your input sums to 24.")
+                  "but the absolute mapping to hours in a day may be lost.")
 
         # 1. Convert everything to fractions
         s_fracs = self._normalize(seasons)
@@ -219,27 +216,29 @@ class TimeComponent(ScenarioComponent):
                     timeslice_data.append(ts_name)
 
                     # Standard Mapping
-                    map_ls.append({"TIMESLICE": ts_name, "SEASON": s, "VALUE": 1})
-                    map_ld.append({"TIMESLICE": ts_name, "DAYTYPE": d, "VALUE": 1})
-                    map_lh.append({"TIMESLICE": ts_name, "DAILYTIMEBRACKET": b, "VALUE": 1})
+                    map_ls.append({"TIMESLICE": ts_name, "SEASON": s, "VALUE": 1.0})
+                    map_ld.append({"TIMESLICE": ts_name, "DAYTYPE": d, "VALUE": 1.0})
+                    map_lh.append({"TIMESLICE": ts_name, "DAILYTIMEBRACKET": b, "VALUE": 1.0})
 
-                    # Calculations using Decimal for exact arithmetic
-                    season_hours = Decimal(str(s_val)) * Decimal(str(self.HOURS_PER_YEAR))
-                    daytype_hours = Decimal(str(d_val)) * season_hours
-                    slice_hours = Decimal(str(b_val)) * daytype_hours
-                    timeslice_hours.append(float(slice_hours))
-
-                    # Calculate YearSplit (TimeSlice as a fraction of Year) using Decimal
-                    year_split_frac = slice_hours / Decimal(str(self.HOURS_PER_YEAR))
                     for y in years:
+                        total_hours = Decimal(str(hours_in_year(y)))
+                        # Calculations using Decimal for exact arithmetic
+                        season_hours = Decimal(str(s_val)) * total_hours
+                        daytype_hours = Decimal(str(d_val)) * season_hours
+                        slice_hours = Decimal(str(b_val)) * daytype_hours
+                        timeslice_hours.append(float(slice_hours))
+                        # Calculate YearSplit (TimeSlice as a fraction of Year) using Decimal
+                        year_split_frac = slice_hours / total_hours
                         year_split_rows.append({"TIMESLICE": ts_name, "YEAR": y, "VALUE": float(year_split_frac)})
                         # Calculate DayTypeSplit (DailyTimeBracket as a fraction of DayType)
                         day_split_rows.append({"DAILYTIMEBRACKET": b, "YEAR": y, "VALUE": float(Decimal(str(b_val)))})
 
         # 4. Validation and normalization for timeslice hours (YearSplit)
-        total_hours = sum(timeslice_hours)
-        if not math.isclose(total_hours, self.HOURS_PER_YEAR, abs_tol=self.TOL):
-            print(f"WARNING: Total calculated time is {total_hours:.4f} hours per year. Expected {self.HOURS_PER_YEAR}.\nPlease adjust your season/daytype/dailytimebracket definitions for better consistency.")
+        calculated_hours = sum(timeslice_hours)
+        actual_hours = sum([hours_in_year(y) for y in years])
+        if not math.isclose(calculated_hours, actual_hours, abs_tol=self.TOL):
+            print(f"WARNING: Total calculated time is {calculated_hours:.4f} hours per year. Expected {actual_hours}.\
+                  Please adjust your season/daytype/dailytimebracket definitions for better consistency.")
 
         # 5. Update class attributes
         self.timeslices_df = pd.DataFrame({"TIMESLICE": timeslice_data})
@@ -264,9 +263,11 @@ class TimeComponent(ScenarioComponent):
         # 8. DaysInDayType Calculation
         # Logic: 365 * SeasonFrac * DayTypeFrac
         didt_rows = []
-        for s, s_val in s_fracs.items():
-            for d, d_val in d_fracs.items():
-                didt_rows.append({"SEASON": s, "DAYTYPE": d, "VALUE": self.DAYS_PER_YEAR * s_val * d_val})
+        for y in years:
+            for s, s_val in s_fracs.items():
+                for d, d_val in d_fracs.items():
+                    didt_rows.append({"SEASON": s, "DAYTYPE": d, "YEAR": y,
+                                      "VALUE": days_in_year(y) * s_val * d_val})
         self.daysindaytype_df = pd.DataFrame(didt_rows)
 
         return timeslice_data, timeslice_hours
