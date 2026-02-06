@@ -125,7 +125,6 @@ supply.add_technology(...).with_conversion(...).with_bounds(...).build()
 
 | ID | Task | Description | Files Affected |
 |----|------|-------------|----------------|
-| **P2.1** | Add schema validation for all CSV files | Define expected columns, types, and constraints. Validate on load/save. | New: `scenario/validation/schemas.py` |
 | **P2.2** | Validate cross-component references | Ensure TECHNOLOGYs referenced in supply exist in TECHNOLOGY.csv, FUELs exist in FUEL.csv, etc. | `scenario/core.py`, `scenario/validation/` |
 | **P2.3** | Standardize error handling | Replace all `print("WARNING")` with proper logging. Define when to warn vs raise. | All component files |
 | **P2.4** | Add unit tests for scenario components | Test each component's `add_*`, `set_*`, `load()`, `save()` methods | `tests/test_scenario/test_*.py` |
