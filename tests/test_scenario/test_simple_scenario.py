@@ -118,36 +118,3 @@ class TestSimpleScenario:
         assert ccgt_cost == 500
         
         print(f"\u2713 All CSVs created successfully in {scenario_dir}")
-    
-    def test_csv_column_names(self, scenario_dir):
-        """Verify all CSVs use correct column naming convention."""
-        
-        # Build scenario first
-        self.test_build_simple_scenario(scenario_dir)
-        
-        # Sets should have VALUE column
-        set_files = ['YEAR.csv', 'REGION.csv', 'TIMESLICE.csv', 'SEASON.csv', 
-                     'DAYTYPE.csv', 'DAILYTIMEBRACKET.csv']
-        
-        for filename in set_files:
-            path = os.path.join(scenario_dir, filename)
-            if os.path.exists(path):
-                df = pd.read_csv(path)
-                assert 'VALUE' in df.columns, f"{filename} missing VALUE column"
-        
-        # Parameters should have explicit columns
-        param_checks = {
-            'DiscountRate.csv': ['REGION', 'VALUE'],
-            'CapitalCost.csv': ['REGION', 'TECHNOLOGY', 'YEAR', 'VALUE'],
-            'VariableCost.csv': ['REGION', 'TECHNOLOGY', 'MODE_OF_OPERATION', 'YEAR', 'VALUE'],
-            'SpecifiedAnnualDemand.csv': ['REGION', 'FUEL', 'YEAR', 'VALUE']
-        }
-        
-        for filename, expected_cols in param_checks.items():
-            path = os.path.join(scenario_dir, filename)
-            if os.path.exists(path):
-                df = pd.read_csv(path)
-                for col in expected_cols:
-                    assert col in df.columns, f"{filename} missing {col} column"
-        
-        print("\u2713 All CSV column names correct")

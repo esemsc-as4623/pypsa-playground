@@ -4,7 +4,7 @@ import pytest
 import pandas as pd
 from datetime import time, date
 
-from pyoscomp.translation.time.constants import ENDOFDAY
+from pyoscomp.constants import ENDOFDAY
 from pyoscomp.translation.time.structures import DayType, DailyTimeBracket, Timeslice
 from pyoscomp.translation.time.translate import create_map
 

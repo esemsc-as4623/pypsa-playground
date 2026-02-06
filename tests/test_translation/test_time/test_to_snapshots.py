@@ -6,7 +6,7 @@ import tempfile
 import shutil
 
 from pyoscomp.translation.time.translate import to_snapshots, SnapshotResult
-from pyoscomp.translation.time.constants import hours_in_year
+from pyoscomp.constants import hours_in_year
 from pyoscomp.scenario.components.time import TimeComponent
 
 

@@ -3,7 +3,7 @@
 import pytest
 from datetime import time, date, timedelta
 
-from pyoscomp.translation.time.constants import ENDOFDAY
+from pyoscomp.constants import ENDOFDAY
 from pyoscomp.translation.time.structures import DayType, DailyTimeBracket
 from pyoscomp.translation.time.translate import create_daytypes_from_dates, create_timebrackets_from_times
 

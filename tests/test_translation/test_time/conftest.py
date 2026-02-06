@@ -2,10 +2,8 @@
 
 import pytest
 import pandas as pd
-from pathlib import Path
 
 from pyoscomp.scenario.components.time import TimeComponent
-from pyoscomp.translation.time.constants import hours_in_year
 
 
 @pytest.fixture

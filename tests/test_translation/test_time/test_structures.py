@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import time, date, datetime
 import calendar
 
-from pyoscomp.translation.time.constants import ENDOFDAY
+from pyoscomp.constants import ENDOFDAY
 from pyoscomp.translation.time.structures import DayType, DailyTimeBracket, Timeslice
 
 

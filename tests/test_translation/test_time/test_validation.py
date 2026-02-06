@@ -2,11 +2,10 @@
 
 import pytest
 import pandas as pd
-from datetime import time, date, timedelta
+from datetime import date
 
-from pyoscomp.translation.time.constants import ENDOFDAY, hours_in_year
-from pyoscomp.translation.time.structures import DayType, DailyTimeBracket, Timeslice
-from pyoscomp.translation.time.translate import to_timeslices, TimesliceResult
+from pyoscomp.constants import ENDOFDAY, hours_in_year
+from pyoscomp.translation.time.translate import to_timeslices
 
 
 class TestCoverageValidation:

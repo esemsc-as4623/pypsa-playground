@@ -4,7 +4,7 @@ import pytest
 import pandas as pd
 from datetime import date
 
-from pyoscomp.translation.time.constants import ENDOFDAY
+from pyoscomp.constants import ENDOFDAY
 from pyoscomp.translation.time.translate import create_endpoints
 
 
