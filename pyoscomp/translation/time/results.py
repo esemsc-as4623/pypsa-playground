@@ -4,7 +4,7 @@ import pandas as pd
 from typing import List, Set, Dict, Tuple
 from dataclasses import dataclass, field
 
-from .constants import TOL, hours_in_year
+from ...constants import TOL, hours_in_year
 from .structures import DayType, DailyTimeBracket, Timeslice
 
 TimesliceMapping = Dict[pd.Timestamp, List[Tuple[int, Timeslice]]]

@@ -5,7 +5,7 @@ from datetime import time, date, datetime
 from typing import Tuple, Optional, Union
 from dataclasses import dataclass, field
 
-from .constants import ENDOFDAY, days_in_month, is_leap_year, hours_in_year
+from ...constants import ENDOFDAY, days_in_month, is_leap_year, hours_in_year
 
 
 @dataclass

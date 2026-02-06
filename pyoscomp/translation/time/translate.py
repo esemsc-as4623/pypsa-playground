@@ -1,20 +1,14 @@
 # pyoscomp/translation/time/translate.py
 
 import pandas as pd
-from datetime import time, date, timedelta, datetime
+from datetime import time, date, timedelta
 from typing import List, Set, Dict, Union, Tuple
 
-from .constants import ENDOFDAY, hours_in_year
+from ...constants import ENDOFDAY, hours_in_year
 from .structures import DayType, DailyTimeBracket, Timeslice
 from .results import TimesliceResult, SnapshotResult
 from ...scenario.components.time import TimeComponent
 
-SnapshotInput = Union[
-    pd.DatetimeIndex,
-    pd.Index,
-    List[pd.Timestamp],
-    List[datetime],
-]
 
 def create_timebrackets_from_times(times: List[time]) -> Set[DailyTimeBracket]:
     """
@@ -180,9 +174,6 @@ def create_daytypes_from_dates(dates: List[date]) -> set[DayType]:
     DayType : The day-of-year range structure created by this function
     create_timebrackets_from_times : Analogous function for creating time-of-day ranges
     """
-    if not dates:
-        raise ValueError("dates list cannot be empty")
-    
     daytypes = set()
     year = 2000 # use leap year for most inclusive daytype definitions
 
@@ -458,7 +449,7 @@ def create_map(snapshots: Union[pd.DatetimeIndex, pd.Index],
     return snapshot_to_timeslice
 
 
-def to_timeslices(snapshots: SnapshotInput) -> TimesliceResult:
+def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResult:
     """
     Convert PyPSA sequential snapshots to OSeMOSYS hierarchical timeslice structure.
     
@@ -587,15 +578,7 @@ def to_timeslices(snapshots: SnapshotInput) -> TimesliceResult:
     # 1. Validate input, convert, and sort
     if len(snapshots) == 0:
         raise ValueError("snapshots cannot be empty")
-    try:
-        snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
-    except (TypeError, ValueError) as e:
-        raise TypeError(
-            f"snapshots must contain datetime-like values. "
-            f"If you have date strings, convert them first with pd.to_datetime(). "
-            f"Original error: {e}"
-        ) from e
-    
+    snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
     years = sorted(snapshots.year.unique().tolist())
     
     # 2. Initialize containers
@@ -623,7 +606,7 @@ def to_timeslices(snapshots: SnapshotInput) -> TimesliceResult:
             timeslices.append(ts)
     
     # 6. Map snapshots to timeslices
-    snapshot_map = create_map(snapshots, timeslices)
+    map = create_map(snapshots, timeslices)
     
     result = TimesliceResult(
         years=years,
@@ -631,7 +614,7 @@ def to_timeslices(snapshots: SnapshotInput) -> TimesliceResult:
         daytypes=daytypes,
         dailytimebrackets=dailytimebrackets,
         timeslices=timeslices,
-        snapshot_to_timeslice=snapshot_map,
+        snapshot_to_timeslice=map,
     )
 
     if not result.validate_coverage():
