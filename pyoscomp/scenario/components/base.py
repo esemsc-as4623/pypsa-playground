@@ -138,3 +138,7 @@ class ScenarioComponent(ABC):
     @abstractmethod
     def save(self):
         pass
+
+    @abstractmethod
+    def crossvalidate(self):
+        pass
