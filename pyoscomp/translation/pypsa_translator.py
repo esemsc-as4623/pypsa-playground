@@ -21,6 +21,12 @@ class PyPSAInputTranslator(InputTranslator):
         Convert generic scenario input to PyPSA network data format.
         Returns a PyPSA Network object.
         """
+        regions = self.scenario_data.sets.regions
+        years = self.scenario_data.sets.years
+        year_split = self.scenario_data.time.year_split
+        demand = self.scenario_data.demand.specified_annual_demand
+        # ... clean, typed access
+
         # 1. Create Buses (Regions)
         regions = self._create_buses()
         self.network.add("Bus", regions)
