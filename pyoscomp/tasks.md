@@ -125,18 +125,14 @@ supply.add_technology(...).with_conversion(...).with_bounds(...).build()
 
 | ID | Task | Description | Files Affected |
 |----|------|-------------|----------------|
-| **P2.2** | Validate cross-component references | Ensure TECHNOLOGYs referenced in supply exist in TECHNOLOGY.csv, FUELs exist in FUEL.csv, etc. | `scenario/core.py`, `scenario/validation/` |
 | **P2.3** | Standardize error handling | Replace all `print("WARNING")` with proper logging. Define when to warn vs raise. | All component files |
 | **P2.4** | Add unit tests for scenario components | Test each component's `add_*`, `set_*`, `load()`, `save()` methods | `tests/test_scenario/test_*.py` |
-| **P2.5** | Validate YearSplit/DaySplit sums to 1.0 | Add validation in TimeComponent that doesn't just warn but optionally raises | `scenario/components/time.py` |
 
 ### Priority 3: Translation Pipeline
 *Goal: Reliable conversion between OSeMOSYS CSVs and PyPSA Network*
 
 | ID | Task | Description | Files Affected |
 |----|------|-------------|----------------|
-| **P3.1** | Define ScenarioData interface | Create typed dataclass/protocol for scenario data that bridges scenario building and translation | New: `pyoscomp/interfaces.py` |
-| **P3.2** | Fix PyPSAInputTranslator to use ScenarioData | Refactor to accept standardized interface, not raw dict | `translation/pypsa_translator.py` |
 | **P3.3** | Implement OSeMOSYSInputTranslator properly | Currently a stub. Should convert ScenarioData to otoole-compatible format | `translation/osemosys_translator.py` |
 | **P3.4** | Document time translation semantics | Explain how timeslices map to snapshots, edge cases, leap years | `docs/time_translation.md` |
 | **P3.5** | Add integration test: same scenario → both models → compare results | Extend simple.ipynb pattern programmatically | `tests/test_integration/test_model_comparison.py` |
