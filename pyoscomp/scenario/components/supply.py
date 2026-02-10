@@ -1,384 +1,376 @@
 # pyoscomp/scenario/components/supply.py
 
 """
-Supply Component for scenario building in PyPSA-OSeMOSYS Comparison Framework.
-Note: this component handles technology / generator definitions and supply-side parameters.
-Supply is provided by a TECHNOLOGY in OSeMOSYS terminology, and by a Generator in PyPSA terminology.
+Supply component for scenario building in PyPSA-OSeMOSYS Comparison Framework.
+
+This component handles technology/generator definitions and supply-side parameters:
+- TECHNOLOGY set (technology registry)
+- FUEL set (auto-generated from activity ratios)
+- MODE_OF_OPERATION set (auto-generated from technology modes)
+- Activity ratios (InputActivityRatio, OutputActivityRatio)
+- Capacity parameters (ResidualCapacity, CapacityFactor, AvailabilityFactor)
+- Operational parameters (OperationalLife, CapacityToActivityUnit)
+
+OSeMOSYS Terminology: TECHNOLOGY, InputActivityRatio, OutputActivityRatio
+PyPSA Terminology: Generator (with efficiency, p_nom, etc.)
+
+Prerequisites:
+- TimeComponent (years, timeslices must be defined)
+- TopologyComponent (regions must be defined)
 """
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 from .base import ScenarioComponent
+from .time import TimeComponent
+
 
 class SupplyComponent(ScenarioComponent):
     """
-    Supply component for technology / generator definitions and supply-side parameters.
-    Handles OSeMOSYS supply parameters: technology metadata, capacity, activity ratios, and operational parameters.
+    Supply component for technology/generator definitions.
 
-    Prerequisites:
-        - Time component must be initialized in the scenario (defines years and timeslices).
-        - Topology component (regions, nodes) must be initialized.
+    Handles the technology registry and all supply-side parameters including
+    conversion efficiencies, capacity factors, and residual capacities.
 
-    Raises descriptive errors if prerequisites are missing.
-    
-    Example usage::
+    Attributes
+    ----------
+    years : list of int
+        Model years (from prerequisites).
+    regions : list of str
+        Region identifiers (from prerequisites).
+    defined_tech : set
+        Set of (region, technology) pairs.
+    defined_fuels : set
+        Set of fuel identifiers referenced in activity ratios.
+
+    Owned Files
+    -----------
+    Sets: TECHNOLOGY.csv, FUEL.csv, MODE_OF_OPERATION.csv
+    Params: CapacityToActivityUnit.csv, OperationalLife.csv,
+            InputActivityRatio.csv, OutputActivityRatio.csv,
+            CapacityFactor.csv, AvailabilityFactor.csv, ResidualCapacity.csv
+
+    Example
+    -------
+    Define technologies::
+
         supply = SupplyComponent(scenario_dir)
-        supply.load()  # Loads all supply parameter CSVs
-        # ... modify DataFrames as needed ...
-        supply.process() # Recomputs supply parameter DataFrames
-        supply.save()  # Saves all supply parameter DataFrames to CSV
-    
-    CSV Format Expectations:
-        - All CSVs must have columns as specified in each method's docstring.
-        - See OSeMOSYS.md for parameter definitions.
+
+        # Register technology
+        supply.add_technology('REGION1', 'GAS_CCGT', operational_life=30)
+
+        # Set conversion (input -> output)
+        supply.set_conversion_technology(
+            'REGION1', 'GAS_CCGT',
+            input_fuel='GAS', output_fuel='ELECTRICITY',
+            efficiency=0.55
+        )
+
+        # Set capacity factors
+        supply.set_capacity_factor(
+            'REGION1', 'GAS_CCGT',
+            season_weights={'Winter': 0.9, 'Summer': 1.0}
+        )
+
+        supply.process()
+        supply.save()
+
+    See Also
+    --------
+    component_mapping.md : Full documentation of supply ownership
     """
-    
-    def __init__(self, scenario_dir):
+
+    owned_files = [
+        'TECHNOLOGY.csv', 'FUEL.csv', 'MODE_OF_OPERATION.csv',
+        'CapacityToActivityUnit.csv', 'OperationalLife.csv',
+        'InputActivityRatio.csv', 'OutputActivityRatio.csv',
+        'CapacityFactor.csv', 'AvailabilityFactor.csv', 'ResidualCapacity.csv'
+    ]
+
+    def __init__(self, scenario_dir: str):
+        """
+        Initialize supply component.
+
+        Parameters
+        ----------
+        scenario_dir : str
+            Path to the scenario directory.
+
+        Raises
+        ------
+        AttributeError
+            If TimeComponent or TopologyComponent not initialized.
+        """
         super().__init__(scenario_dir)
 
         # Check prerequisites
-        self.years, self.regions = self.check_prerequisites(time=True, topology=True)
-        self.time_axis = self.load_time_axis()
+        prereqs = self.check_prerequisites(
+            require_years=True,
+            require_regions=True,
+            require_timeslices=True
+        )
+        self.years = prereqs['years']
+        self.regions = prereqs['regions']
+        self.timeslices = prereqs['timeslices']
 
-        # Supply parameters
+        # Load time axis for capacity factor calculations
+        self._time_axis = self._load_time_axis()
+
+        # Parameter DataFrames
         self.capacity_to_activity_unit = self.init_dataframe("CapacityToActivityUnit")
+        self.operational_life = self.init_dataframe("OperationalLife")
         self.residual_capacity = self.init_dataframe("ResidualCapacity")
         self.input_activity_ratio = self.init_dataframe("InputActivityRatio")
         self.output_activity_ratio = self.init_dataframe("OutputActivityRatio")
         self.capacity_factor = self.init_dataframe("CapacityFactor")
         self.availability_factor = self.init_dataframe("AvailabilityFactor")
-        self.operational_life = self.init_dataframe("OperationalLife")
 
         # Tracking
-        self.defined_tech = set()                    # (Region, Technology)
-        self.capacity_factor_assignments = {}        # (Region, Technology, Year) -> Profile Assignment
-        self.mode_definitions = {}                   # (Region, Technology) -> [Mode1, Mode2, ...]
-        self.defined_fuels = set()                   # Set of all fuels referenced in activity ratios
+        self.defined_tech: Set[Tuple[str, str]] = set()
+        self.defined_fuels: Set[str] = set()
+        self._mode_definitions: Dict[Tuple[str, str], List[str]] = {}
+        self._capacity_factor_assignments: Dict[Tuple, Dict] = {}
 
-    # === Prerequisite Check ===
-    def check_prerequisites(self, **kwargs):
+    # =========================================================================
+    # Properties
+    # =========================================================================
+
+    @property
+    def technologies(self) -> List[str]:
+        """Get list of unique technology identifiers."""
+        return list({tech for _, tech in self.defined_tech})
+
+    @property
+    def fuels(self) -> List[str]:
+        """Get list of defined fuel identifiers."""
+        return list(self.defined_fuels)
+
+    @property
+    def modes(self) -> Set[str]:
+        """Get set of all modes across all technologies."""
+        all_modes = set()
+        for modes in self._mode_definitions.values():
+            all_modes.update(modes)
+        return all_modes if all_modes else {'MODE1'}
+
+    # =========================================================================
+    # Load and Save
+    # =========================================================================
+
+    def load(self) -> None:
         """
-        Check that required components (Time, Topology) are initialized in the scenario.
-        Raises an error if any prerequisite is missing.
+        Load all supply parameter CSV files.
+
+        Raises
+        ------
+        FileNotFoundError
+            If any required file is missing.
+        ValueError
+            If any file fails schema validation.
         """
-        # Check Time Component
-        years = self.read_csv("YEAR.csv")["VALUE"].tolist()
-        if not years:
-            raise AttributeError("Time component is not defined for this scenario.")
+        self.capacity_to_activity_unit = self.read_csv("CapacityToActivityUnit.csv")
+        self.operational_life = self.read_csv("OperationalLife.csv")
+        self.residual_capacity = self.read_csv("ResidualCapacity.csv")
+        self.input_activity_ratio = self.read_csv("InputActivityRatio.csv")
+        self.output_activity_ratio = self.read_csv("OutputActivityRatio.csv")
+        self.capacity_factor = self.read_csv("CapacityFactor.csv")
+        self.availability_factor = self.read_csv("AvailabilityFactor.csv")
 
-        # Check Topology Component
-        regions = self.read_csv("REGION.csv")["VALUE"].tolist()
-        if not regions:
-            raise AttributeError("Topology component is not defined for this scenario.")
-        
-        return years, regions
-    
-    def load_time_axis(self):
+        # Rebuild tracking
+        self.defined_tech = set(
+            zip(
+                self.capacity_to_activity_unit['REGION'],
+                self.capacity_to_activity_unit['TECHNOLOGY']
+            )
+        )
+        self._rebuild_fuels_and_modes()
+
+    def save(self) -> None:
         """
-        Load temporal resolution data from TimeComponent.
-        Returns a DataFrame with TIMESLICE, YEAR, VALUE, Season, DayType, DailyTimeBracket columns.
-        Raises an error if TimeComponent cannot be loaded.
+        Save all supply parameter DataFrames to CSV.
+
+        Also generates TECHNOLOGY.csv, FUEL.csv, MODE_OF_OPERATION.csv sets
+        based on defined technologies and activity ratios.
+
+        Raises
+        ------
+        ValueError
+            If any DataFrame fails schema validation.
         """
-        try:
-            from pyoscomp.scenario.components.time import TimeComponent
-            time_data = TimeComponent.load_time_axis(self)
+        # Generate set CSVs
+        tech_df = pd.DataFrame({"VALUE": list(self.technologies)})
+        fuel_df = pd.DataFrame({"VALUE": list(self.defined_fuels)})
+        mode_df = pd.DataFrame({"VALUE": list(self.modes)})
 
-            df = time_data['yearsplit'].copy()
-            slice_map = time_data['slice_map']
+        self.write_dataframe("TECHNOLOGY.csv", tech_df)
+        self.write_dataframe("FUEL.csv", fuel_df)
+        self.write_dataframe("MODE_OF_OPERATION.csv", mode_df)
 
-            df['Season'] = df['TIMESLICE'].map(lambda x: slice_map[x]['Season'])
-            df['DayType'] = df['TIMESLICE'].map(lambda x: slice_map[x]['DayType'])
-            df['DailyTimeBracket'] = df['TIMESLICE'].map(lambda x: slice_map[x]['DailyTimeBracket'])
-            return df
-        except Exception as e:
-            raise AttributeError(f"Could not load time axis from TimeComponent: {e}")
-    
-    # === Load and Save Methods ===
-    def load(self):
+        # Save parameter CSVs
+        self._save_sorted("CapacityToActivityUnit.csv", self.capacity_to_activity_unit,
+                          ["REGION", "TECHNOLOGY", "VALUE"], ["REGION", "TECHNOLOGY"])
+        self._save_sorted("OperationalLife.csv", self.operational_life,
+                          ["REGION", "TECHNOLOGY", "VALUE"], ["REGION", "TECHNOLOGY"])
+        self._save_sorted("ResidualCapacity.csv", self.residual_capacity,
+                          ["REGION", "TECHNOLOGY", "YEAR", "VALUE"],
+                          ["REGION", "TECHNOLOGY", "YEAR"])
+        self._save_sorted("InputActivityRatio.csv", self.input_activity_ratio,
+                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"],
+                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
+        self._save_sorted("OutputActivityRatio.csv", self.output_activity_ratio,
+                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"],
+                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
+        self._save_sorted("CapacityFactor.csv", self.capacity_factor,
+                          ["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR", "VALUE"],
+                          ["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR"])
+        self._save_sorted("AvailabilityFactor.csv", self.availability_factor,
+                          ["REGION", "TECHNOLOGY", "YEAR", "VALUE"],
+                          ["REGION", "TECHNOLOGY", "YEAR"])
+
+    def _save_sorted(
+        self,
+        filename: str,
+        df: pd.DataFrame,
+        cols: List[str],
+        sort_cols: List[str]
+    ) -> None:
+        """Helper to save DataFrame with column selection and sorting."""
+        if df.empty:
+            self.write_dataframe(filename, df)
+        else:
+            sorted_df = df[cols].sort_values(by=sort_cols)
+            self.write_dataframe(filename, sorted_df)
+
+    # =========================================================================
+    # User Input: Technology Registration
+    # =========================================================================
+
+    def add_technology(
+        self,
+        region: str,
+        technology: str,
+        operational_life: int,
+        capacity_to_activity_unit: float = 31.536
+    ) -> None:
         """
-        Load all supply parameter CSV files into DataFrames.
-        Uses read_csv from base class. Updates DataFrames and defined_tech.
-        """
-        # Capacity to Activity
-        df = self.read_csv("CapacityToActivityUnit.csv")
-        self.capacity_to_activity_unit = df
-        self.defined_tech = set(zip(df['REGION'], df['TECHNOLOGY']))
+        Register a new technology with basic metadata.
 
-        # Capacity Factor
-        df = self.read_csv("CapacityFactor.csv")
-        self.capacity_factor = df
-
-        # Availability Factor
-        df = self.read_csv("AvailabilityFactor.csv")
-        self.availability_factor = df
-
-        # Operational Life
-        df = self.read_csv("OperationalLife.csv")
-        self.operational_life = df
-
-        # Residual Capacity
-        df = self.read_csv("ResidualCapacity.csv")
-        self.residual_capacity = df
-
-        # Input Activity Ratio
-        df = self.read_csv("InputActivityRatio.csv")
-        self.input_activity_ratio = df
-
-        # Output Activity Ratio
-        df = self.read_csv("OutputActivityRatio.csv")
-        self.output_activity_ratio = df
-
-    def save(self):
-        """
-        Save all supply parameter DataFrames to CSV files in the scenario directory.
-        Uses write_dataframe from base class.
-        """
-        # Capacity to Activity
-        df = self.capacity_to_activity_unit[["REGION", "TECHNOLOGY", "VALUE"]].sort_values(by=["REGION", "TECHNOLOGY"])
-        self.write_dataframe("CapacityToActivityUnit.csv", df)
-
-        # Capacity Factor
-        df = self.capacity_factor[["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR", "VALUE"]].sort_values(by=["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR"])
-        self.write_dataframe("CapacityFactor.csv", df)
-
-        # Availability Factor
-        df = self.availability_factor[["REGION", "TECHNOLOGY", "YEAR", "VALUE"]].sort_values(by=["REGION", "TECHNOLOGY", "YEAR"])
-        self.write_dataframe("AvailabilityFactor.csv", df)
-
-        # Operational Life
-        df = self.operational_life[["REGION", "TECHNOLOGY", "VALUE"]].sort_values(by=["REGION", "TECHNOLOGY"])
-        self.write_dataframe("OperationalLife.csv", df)
-
-        # Residual Capacity
-        df = self.residual_capacity[["REGION", "TECHNOLOGY", "YEAR", "VALUE"]].sort_values(by=["REGION", "TECHNOLOGY", "YEAR"])
-        self.write_dataframe("ResidualCapacity.csv", df)
-
-        # Input Activity Ratio
-        df = self.input_activity_ratio[["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"]].sort_values(by=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
-        self.write_dataframe("InputActivityRatio.csv", df)
-
-        # Output Activity Ratio
-        df = self.output_activity_ratio[["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"]].sort_values(by=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
-        self.write_dataframe("OutputActivityRatio.csv", df)
-
-    # === User Input Methods ===
-    def add_technology(self, region, technology, operational_life: int, 
-                       capacity_to_activity_unit=31.536):
-        """
-        Register a new technology in the scenario with basic metadata.
         This is the entry point for defining any supply technology.
-        
-        :param region: str, Region where the technology is located
-        :param technology: str, Name/identifier of the technology (e.g., 'COAL_PP', 'WIND_ONSHORE')
-        :param operational_life: int, Operational lifetime in years
-        :param capacity_to_activity_unit: float, Conversion factor from capacity to activity
-                                          Default 31.536 converts GW to PJ/year (GW × 8760 hours × 3.6 MJ/kWh / 1000)
-        
-        Example::
-            supply.add_technology('Region1', 'COAL_PP', operational_life=40, capacity_to_activity_unit=31.536)
-            supply.add_technology('Region1', 'WIND_ONSHORE', operational_life=25)
+        Call this before setting conversion, capacity factors, etc.
+
+        Parameters
+        ----------
+        region : str
+            Region identifier.
+        technology : str
+            Technology identifier (e.g., 'GAS_CCGT', 'SOLAR_PV').
+        operational_life : int
+            Operational lifetime in years (must be positive).
+        capacity_to_activity_unit : float, default 31.536
+            Conversion factor from capacity to activity.
+            Default converts GW to PJ/year (GW × 8760h × 3.6 MJ/kWh / 1000).
+
+        Raises
+        ------
+        ValueError
+            If region not defined or operational_life <= 0.
+
+        Example
+        -------
+        >>> supply.add_technology('REGION1', 'GAS_CCGT', operational_life=30)
         """
         if region not in self.regions:
-            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
-        self.defined_tech.add((region, technology))
-
-        # --- VALIDATION: Operational Life Provided, Non-negative ---
+            raise ValueError(f"Region '{region}' not defined. Initialize topology first.")
         if operational_life <= 0:
-            raise ValueError(f"Operational life cannot be negative for technology '{technology}' in region '{region}'.")
-        
-        record1 = [{"REGION": region, "TECHNOLOGY": technology, "VALUE": operational_life}]
-        record2 = [{"REGION": region, "TECHNOLOGY": technology, "VALUE": capacity_to_activity_unit}]
-        
-        self.operational_life = self.add_to_dataframe(
-            self.operational_life, record1, key_columns=["REGION", "TECHNOLOGY"]
-        )
-        self.capacity_to_activity_unit = self.add_to_dataframe(
-            self.capacity_to_activity_unit, record2, key_columns=["REGION", "TECHNOLOGY"]
-        )
-    
-    def set_conversion_technology(self, region, technology, input_fuel, output_fuel,
-                                  efficiency, mode='MODE1', year=None):
-        """
-        Define a simple conversion technology that converts one fuel to another.
-        This is the most common type of technology (power plants, refineries, etc.).
-        
-        :param region: str, Region where technology operates
-        :param technology: str, Technology identifier
-        :param input_fuel: str, Input fuel consumed
-        :param output_fuel: str, Output fuel produced
-        :param efficiency: float or dict, Conversion efficiency (0-1). 
-                          Can be float for constant efficiency or dict {year: efficiency} for time-varying
-        :param mode: str, Mode of operation identifier (default 'MODE1')
-        :param year: int, list[int], or None. If specified, applies only to those years
-        
-        Example::
-            # Gas power plant with 55% efficiency
-            supply.set_conversion_technology('Region1', 'GAS_CCGT', 
-                                             input_fuel='GAS_NAT', 
-                                             output_fuel='ELEC',
-                                             efficiency=0.55)
-            
-            # Efficiency improving over time
-            supply.set_conversion_technology('Region1', 'SOLAR_PV',
-                                             input_fuel='SOLAR_RESOURCE',
-                                             output_fuel='ELEC',
-                                             efficiency={2020: 0.18, 2030: 0.22, 2040: 0.25})
-        """
-        # --- VALIDATION: Region, Technology, Year, Fuel, Efficiency ---
-        if region not in self.regions:
-            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
-        if (region, technology) not in self.defined_tech:
-            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
+            raise ValueError(f"Operational life must be positive, got {operational_life}")
+
         self.defined_tech.add((region, technology))
-        if isinstance(year, int) and year not in self.years:
-            raise ValueError(f"Year {year} not defined in scenario years.")
-        if isinstance(year, list) and not all(y in self.years for y in year):
-            raise ValueError(f"One or more years in {year} not defined in scenario years.")
+
+        # OperationalLife
+        ol_record = [{"REGION": region, "TECHNOLOGY": technology, "VALUE": operational_life}]
+        self.operational_life = self.add_to_dataframe(
+            self.operational_life, ol_record, key_columns=["REGION", "TECHNOLOGY"]
+        )
+
+        # CapacityToActivityUnit
+        cau_record = [{"REGION": region, "TECHNOLOGY": technology, "VALUE": capacity_to_activity_unit}]
+        self.capacity_to_activity_unit = self.add_to_dataframe(
+            self.capacity_to_activity_unit, cau_record, key_columns=["REGION", "TECHNOLOGY"]
+        )
+
+    # =========================================================================
+    # User Input: Technology Types
+    # =========================================================================
+
+    def set_conversion_technology(
+        self,
+        region: str,
+        technology: str,
+        input_fuel: str,
+        output_fuel: str,
+        efficiency: Union[float, Dict[int, float]],
+        mode: str = 'MODE1',
+        years: Optional[List[int]] = None
+    ) -> None:
+        """
+        Define a conversion technology (input fuel → output fuel).
+
+        Parameters
+        ----------
+        region : str
+            Region identifier.
+        technology : str
+            Technology identifier (must be registered via add_technology).
+        input_fuel : str
+            Input fuel consumed.
+        output_fuel : str
+            Output fuel produced.
+        efficiency : float or dict
+            Conversion efficiency (0, 1]. If dict, {year: efficiency}.
+        mode : str, default 'MODE1'
+            Mode of operation identifier.
+        years : list of int, optional
+            Years to apply. If None, applies to all model years.
+
+        Raises
+        ------
+        ValueError
+            If technology not registered, efficiency invalid, or fuels same.
+
+        Example
+        -------
+        >>> supply.set_conversion_technology(
+        ...     'REGION1', 'GAS_CCGT',
+        ...     input_fuel='NATURAL_GAS', output_fuel='ELECTRICITY',
+        ...     efficiency=0.55
+        ... )
+        """
+        self._validate_technology(region, technology)
+
         if input_fuel == output_fuel:
-            raise ValueError("Input and output fuel must be different.")
-        if isinstance(efficiency, dict):
-            for y, val in efficiency.items():
-                if not (0 < val <= 1):
-                    raise ValueError(f"Efficiency for year {y} must be in (0, 1].")
-        else:
-            if not (0 < efficiency <= 1):
-                raise ValueError("Efficiency must be in (0, 1].")
-        
-        if isinstance(year, int):
-            years = [year]
-        if isinstance(year, list):
-            years = year
-        if year is None:
-            years = self.years
-        
-        # Map year to efficiency
-        # Implicitly uses step interpolation
-        if isinstance(efficiency, dict):
-            eff_years = sorted(efficiency.keys())
-            eff_map = {}
-            for y in self.years:
-                prev_years = [ey for ey in eff_years if ey <= y]
-                if prev_years:
-                    last_year = max(prev_years)
-                    eff_map[y] = efficiency[last_year]
-                else:
-                    first_year = min(eff_years)
-                    eff_map[y] = efficiency[first_year]
-        else:
-            eff_map = {y: efficiency for y in self.years}
-        
-        # Compute input/output activity ratios
+            raise ValueError("Input and output fuels must be different")
+
+        # Validate and map efficiency
+        eff_map = self._build_efficiency_map(efficiency)
+        target_years = years if years else self.years
+
+        # Generate activity ratios
         input_records, output_records = [], []
-        for y in years:
-            eff = eff_map[y]
-            input_ratio, output_ratio = self._apply_efficiency_to_ratios(eff, mode=mode)
+        for y in target_years:
+            eff = eff_map.get(y, list(eff_map.values())[0])
+            inp_ratio, out_ratio = self._efficiency_to_ratios(eff)
+
             input_records.append({
-                "REGION": region, "TECHNOLOGY": technology, "FUEL": input_fuel, 
-                "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": input_ratio})
+                "REGION": region, "TECHNOLOGY": technology, "FUEL": input_fuel,
+                "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": inp_ratio
+            })
             output_records.append({
-                "REGION": region, "TECHNOLOGY": technology, "FUEL": output_fuel, 
-                "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": output_ratio})
-        
-        self.input_activity_ratio = self.add_to_dataframe(self.input_activity_ratio, input_records,
-                                                          key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
-        self.output_activity_ratio = self.add_to_dataframe(self.output_activity_ratio, output_records,
-                                                           key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
-        self.defined_fuels.add(input_fuel)
-        self.defined_fuels.add(output_fuel)
-
-        if (region, technology) not in self.mode_definitions:
-            self.mode_definitions[(region, technology)] = []
-        if mode not in self.mode_definitions[(region, technology)]:
-            self.mode_definitions[(region, technology)].append(mode)
-
-    def set_multimode_technology(self, region, technology, modes_config):
-        """
-        Define a technology with multiple operating modes (e.g., CHP, fuel-switching, variable efficiency).
-        
-        :param region: str, Region where technology operates
-        :param technology: str, Technology identifier
-        :param modes_config: dict, Configuration for each mode
-                            {mode_name: {
-                                'inputs': {fuel: ratio, ...},
-                                'outputs': {fuel: ratio, ...},
-                                'years': list or None  # Optional: apply only to specific years
-                            }}
-        
-        Example::
-            # CHP plant with electricity-only and combined heat-power modes
-            supply.set_multimode_technology('Region1', 'GAS_CHP', {
-                'MODE1': {  # Electricity only
-                    'inputs': {'GAS_NAT': 1.818},   # 55% efficiency
-                    'outputs': {'ELEC': 1.0}
-                },
-                'MODE2': {  # CHP mode
-                    'inputs': {'GAS_NAT': 1.25},    # 80% total efficiency
-                    'outputs': {'ELEC': 0.5625, 'HEAT_DISTRICT': 0.4375}
-                }
+                "REGION": region, "TECHNOLOGY": technology, "FUEL": output_fuel,
+                "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": out_ratio
             })
-            
-            # Technology with mode available only in later years
-            supply.set_multimode_technology('Region1', 'FLEX_TECH', {
-                'MODE_OLD': {
-                    'inputs': {'FUEL_A': 1.5},
-                    'outputs': {'ELEC': 1.0},
-                    'years': [2020, 2025, 2030]  # Only available in these years
-                },
-                'MODE_NEW': {
-                    'inputs': {'FUEL_B': 1.2},
-                    'outputs': {'ELEC': 1.0},
-                    'years': [2030, 2035, 2040]  # New mode from 2030
-                }
-            })
-        """
-        # --- VALIDATION: Region, Technology, Mode ---
-        if region not in self.regions:
-            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
-        if (region, technology) not in self.defined_tech:
-            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
-        self._validate_mode_configuration(modes_config)
 
-        if (region, technology) not in self.mode_definitions:
-            self.mode_definitions[(region, technology)] = []
-        
-        input_records, output_records = [], []
-
-        for mode, config in modes_config.items():
-            if mode not in self.mode_definitions[(region, technology)]:
-                self.mode_definitions[(region, technology)].append(mode)
-            
-            inputs = config.get('inputs', {})
-            outputs = config.get('outputs', {})
-            mode_years = config.get('years', None)
-            
-            # Determine which years this mode applies to
-            if mode_years is None:
-                years_to_apply = self.years
-            else:
-                # Validate years
-                if not all(y in self.years for y in mode_years):
-                    invalid = [y for y in mode_years if y not in self.years]
-                    raise ValueError(f"Mode '{mode}' specifies invalid years: {invalid}. Valid years: {self.years}")
-                years_to_apply = mode_years
-            
-            # Create records for each year
-            for y in years_to_apply:
-                # Input ratios
-                for fuel, ratio in inputs.items():
-                    input_records.append({
-                        "REGION": region, "TECHNOLOGY": technology, "FUEL": fuel, 
-                        "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio
-                    })
-                    self.defined_fuels.add(fuel)
-                
-                # Output ratios
-                for fuel, ratio in outputs.items():
-                    output_records.append({
-                        "REGION": region, "TECHNOLOGY": technology, "FUEL": fuel, 
-                        "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio
-                    })
-                    self.defined_fuels.add(fuel)
-        
         self.input_activity_ratio = self.add_to_dataframe(
             self.input_activity_ratio, input_records,
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
@@ -388,746 +380,566 @@ class SupplyComponent(ScenarioComponent):
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
         )
 
-    def set_resource_technology(self, region, technology, output_fuel):
+        self.defined_fuels.update([input_fuel, output_fuel])
+        self._register_mode(region, technology, mode)
+
+    def set_resource_technology(
+        self,
+        region: str,
+        technology: str,
+        output_fuel: str
+    ) -> None:
         """
-        Define a resource extraction/harvesting technology (e.g., renewables, mining).
-        These technologies typically have no input fuel, just produce from a resource.
-        
-        :param region: str, Region where technology operates
-        :param technology: str, Technology identifier
-        :param output_fuel: str, Fuel produced
-        
-        Example::
-            # Define wind onshore resource technology
-            supply.set_resource_technology('Region1', 'WIND_ONSHORE', output_fuel='ELEC')
+        Define a resource/extraction technology (no input, produces output).
+
+        Used for renewables (wind, solar), primary extraction (mining), etc.
+
+        Parameters
+        ----------
+        region : str
+            Region identifier.
+        technology : str
+            Technology identifier.
+        output_fuel : str
+            Fuel produced.
+
+        Example
+        -------
+        >>> supply.set_resource_technology('REGION1', 'SOLAR_PV', 'ELECTRICITY')
         """
-        # --- VALIDATION: Region, Technology, Mode ---
-        if region not in self.regions:
-            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
-        if (region, technology) not in self.defined_tech:
-            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
-        self.defined_fuels.add(output_fuel)
-        if (region, technology) not in self.mode_definitions:
-            self.mode_definitions[(region, technology)] = ['MODE1']
-        elif 'MODE1' not in self.mode_definitions[(region, technology)]:
-            self.mode_definitions[(region, technology)].append('MODE1')
-        
-        # Output activity ratios always 1.0 for resource technologies
+        self._validate_technology(region, technology)
+
         output_records = []
         for y in self.years:
             output_records.append({
-                "REGION": region, "TECHNOLOGY": technology, 
-                "FUEL": output_fuel, "MODE_OF_OPERATION": 'MODE1', 
-                "YEAR": y, "VALUE": 1.0
+                "REGION": region, "TECHNOLOGY": technology, "FUEL": output_fuel,
+                "MODE_OF_OPERATION": "MODE1", "YEAR": y, "VALUE": 1.0
             })
+
         self.output_activity_ratio = self.add_to_dataframe(
             self.output_activity_ratio, output_records,
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
         )
 
-    def set_capacity_factor(self, region, technology, year=None,
-                            timeslice_factor=None, season_factor=None, 
-                            day_factor=None, time_factor=None):
-        """
-        Set capacity factor profile for a technology across timeslices.
-        Capacity factor represents the fraction of installed capacity that can operate.
-        Supports direct timeslice factors or hierarchical (season, day, time) factors.
-        Factor dictionaries should map timeslice/season/daytype/dailytimebracket names to their respective factors.
-        If both timeslice factors and hierarchical factors are provided, timeslice factors take precedence.
-        If multiple factor dictionaries are provided, hierarchical weighting is used.
-        Missing entries default to 1.0, i.e. no adjustment.
+        self.defined_fuels.add(output_fuel)
+        self._register_mode(region, technology, "MODE1")
 
-        :param region: str, Region where technology operates
-        :param technology: str, Technology identifier
-        :param year: int, list[int], or None. If None, applies to all years
-        :param timeslice_factor: dict or None, {timeslice: factor} for direct assignment
-        :param season_factor: dict or None, {season: factor} for seasonal variation
-        :param day_factor: dict or None, {daytype: factor} for weekday/weekend variation
-        :param time_factor: dict or None, {dailytimebracket: factor} for time-of-day variation
-        
-        Example::
-            # Solar PV with time-of-day variation
-            supply.set_capacity_factor('Region1', 'SOLAR_PV', 
-                                       time_factor={'Morning': 0.3, 'Midday': 1.0, 'Evening': 0.2, 'Night': 0.0})
-            
-            # Wind with seasonal variation
-            supply.set_capacity_factor('Region1', 'WIND_OFFSHORE',
-                                       season_factor={'Winter': 1.2, 'Spring': 0.9, 'Summer': 0.7, 'Fall': 1.1})
-            
-            # Combined seasonal and time-of-day
-            supply.set_capacity_factor('Region1', 'WIND_ONSHORE',
-                                       season_factor={'Winter': 1.1, 'Summer': 0.9},
-                                       time_factor={'Day': 1.05, 'Night': 0.95})
+    def set_multimode_technology(
+        self,
+        region: str,
+        technology: str,
+        modes_config: Dict[str, Dict]
+    ) -> None:
         """
-        # --- VALIDATION: Region, Technology, Year ---
-        if region not in self.regions:
-            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
-        if (region, technology) not in self.defined_tech:
-            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
-        self.defined_tech.add((region, technology))
-        if isinstance(year, int) and year not in self.years:
-            raise ValueError(f"Year {year} not defined in scenario years.")
-        if isinstance(year, list) and not all(y in self.years for y in year):
-            raise ValueError(f"One or more years in {year} not defined in scenario years.")
-        
-        # Determine which years to apply to
-        if isinstance(year, int):
-            years = [year]
-        elif isinstance(year, list):
-            years = year
-        else:
-            years = self.years  # Apply to ALL years, not just first
-        
-        # Create comprehensive timeslice factor dict ONCE (efficiency optimization)
-        if timeslice_factor is not None:
-            cf_dict = self._apply_timeslice_factors(timeslice_factor, default=1.0)
-        elif any(f is not None for f in [season_factor, day_factor, time_factor]):
-            cf_dict = self._apply_hierarchical_factors(
-                season_factor or {}, day_factor or {}, time_factor or {}, default=1.0
+        Define a technology with multiple operating modes.
+
+        Parameters
+        ----------
+        region : str
+            Region identifier.
+        technology : str
+            Technology identifier.
+        modes_config : dict
+            Configuration per mode::
+
+                {mode_name: {
+                    'inputs': {fuel: ratio, ...},
+                    'outputs': {fuel: ratio, ...},
+                    'years': list or None  # Optional
+                }}
+
+        Example
+        -------
+        >>> supply.set_multimode_technology('REGION1', 'CHP_PLANT', {
+        ...     'ELEC_ONLY': {'inputs': {'GAS': 1.82}, 'outputs': {'ELEC': 1.0}},
+        ...     'CHP_MODE': {'inputs': {'GAS': 1.25}, 'outputs': {'ELEC': 0.5, 'HEAT': 0.3}}
+        ... })
+        """
+        self._validate_technology(region, technology)
+        self._validate_modes_config(modes_config)
+
+        input_records, output_records = [], []
+
+        for mode, config in modes_config.items():
+            inputs = config.get('inputs', {})
+            outputs = config.get('outputs', {})
+            mode_years = config.get('years', self.years)
+
+            for y in mode_years:
+                for fuel, ratio in inputs.items():
+                    input_records.append({
+                        "REGION": region, "TECHNOLOGY": technology, "FUEL": fuel,
+                        "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio
+                    })
+                    self.defined_fuels.add(fuel)
+
+                for fuel, ratio in outputs.items():
+                    output_records.append({
+                        "REGION": region, "TECHNOLOGY": technology, "FUEL": fuel,
+                        "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": ratio
+                    })
+                    self.defined_fuels.add(fuel)
+
+            self._register_mode(region, technology, mode)
+
+        self.input_activity_ratio = self.add_to_dataframe(
+            self.input_activity_ratio, input_records,
+            key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
+        )
+        self.output_activity_ratio = self.add_to_dataframe(
+            self.output_activity_ratio, output_records,
+            key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
+        )
+
+    # =========================================================================
+    # User Input: Capacity and Availability
+    # =========================================================================
+
+    def set_residual_capacity(
+        self,
+        region: str,
+        technology: str,
+        trajectory: Dict[int, float],
+        interpolation: str = 'step'
+    ) -> None:
+        """
+        Define existing/legacy capacity over model years.
+
+        Parameters
+        ----------
+        region : str
+            Region identifier.
+        technology : str
+            Technology identifier.
+        trajectory : dict
+            Known capacity points {year: capacity}.
+        interpolation : {'step', 'linear'}
+            Method for years between trajectory points.
+
+        Example
+        -------
+        >>> supply.set_residual_capacity(
+        ...     'REGION1', 'OLD_COAL',
+        ...     trajectory={2025: 10, 2035: 5, 2045: 0},
+        ...     interpolation='linear'
+        ... )
+        """
+        self._validate_technology(region, technology)
+
+        if not trajectory:
+            raise ValueError(f"Empty trajectory for {region}/{technology}")
+        for y, val in trajectory.items():
+            if val < 0:
+                raise ValueError(f"Negative capacity {val} in year {y}")
+
+        records = self._interpolate_trajectory(
+            {"REGION": region, "TECHNOLOGY": technology},
+            trajectory, interpolation
+        )
+
+        self.residual_capacity = self.add_to_dataframe(
+            self.residual_capacity, records,
+            key_columns=["REGION", "TECHNOLOGY", "YEAR"]
+        )
+
+    def set_capacity_factor(
+        self,
+        region: str,
+        technology: str,
+        years: Optional[Union[int, List[int]]] = None,
+        timeslice_weights: Optional[Dict[str, float]] = None,
+        season_weights: Optional[Dict[str, float]] = None,
+        daytype_weights: Optional[Dict[str, float]] = None,
+        bracket_weights: Optional[Dict[str, float]] = None
+    ) -> None:
+        """
+        Set capacity factor profile across timeslices.
+
+        Parameters
+        ----------
+        region : str
+            Region identifier.
+        technology : str
+            Technology identifier.
+        years : int, list, or None
+            Years to apply. None applies to all years.
+        timeslice_weights : dict, optional
+            Direct {timeslice: factor} mapping.
+        season_weights : dict, optional
+            {season: factor} for seasonal variation.
+        daytype_weights : dict, optional
+            {daytype: factor} for day pattern variation.
+        bracket_weights : dict, optional
+            {bracket: factor} for time-of-day variation.
+
+        Notes
+        -----
+        Weights default to 1.0 for unspecified entries.
+        Values are clamped to [0, 1].
+
+        Example
+        -------
+        >>> supply.set_capacity_factor(
+        ...     'REGION1', 'SOLAR_PV',
+        ...     bracket_weights={'Day': 0.8, 'Night': 0.0}
+        ... )
+        """
+        self._validate_technology(region, technology)
+
+        target_years = self._resolve_years(years)
+
+        # Build capacity factor dictionary
+        if timeslice_weights is not None:
+            cf_dict = self._apply_timeslice_weights(timeslice_weights, default=1.0)
+        elif any(w is not None for w in [season_weights, daytype_weights, bracket_weights]):
+            cf_dict = self._apply_hierarchical_weights(
+                season_weights or {},
+                daytype_weights or {},
+                bracket_weights or {},
+                default=1.0
             )
         else:
-            cf_dict = self._apply_timeslice_factors({}, default=1.0)
-        
-        # Apply to all specified years
-        for y in years:
-            self.capacity_factor_assignments[(region, technology, y)] = {
+            cf_dict = {ts: 1.0 for ts in self.timeslices}
+
+        for y in target_years:
+            self._capacity_factor_assignments[(region, technology, y)] = {
                 "type": "custom", "weights": cf_dict
             }
 
-    def set_availability_factor(self, region, technology, availability):
+    def set_availability_factor(
+        self,
+        region: str,
+        technology: str,
+        availability: Union[float, Dict[int, float]]
+    ) -> None:
         """
-        Set annual availability factor for a technology (maintenance, forced outages).
-        This is different from capacity factor - it represents planned/unplanned downtime.
-        
-        :param region: str, Region where technology operates
-        :param technology: str, Technology identifier
-        :param availability: float or dict, Annual availability (0-1)
-                            If float: constant across all years
-                            If dict: {year: availability} for time-varying
-        
-        Example::
-            # Nuclear plant with 90% availability (10% maintenance/outages)
-            supply.set_availability_factor('Region1', 'NUCLEAR', availability=0.90)
-            
-            # Coal plant with improving availability due to better maintenance
-            supply.set_availability_factor('Region1', 'COAL_PP',
-                                           availability={2020: 0.85, 2030: 0.88, 2040: 0.90})
-        """
-        # --- VALIDATION: Region, Technology, Year, Availability ---
-        if region not in self.regions:
-            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
-        if (region, technology) not in self.defined_tech:
-            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
-        self.defined_tech.add((region, technology))
-        if isinstance(availability, dict):
-            for y, val in availability.items():
-                if not (0 <= val <= 1):
-                    raise ValueError(f"Resource availability for year {y} must be in [0, 1].")
-        elif isinstance(availability, (int, float)):
-            if not (0 <= availability <= 1):
-                raise ValueError("Resource availability must be in [0, 1].")
+        Set annual availability factor (maintenance, outages).
 
-        # Map year to availability factor
-        # Implicitly uses step interpolation
+        Parameters
+        ----------
+        region : str
+            Region identifier.
+        technology : str
+            Technology identifier.
+        availability : float or dict
+            Annual availability [0, 1]. If dict, {year: availability}.
+
+        Example
+        -------
+        >>> supply.set_availability_factor('REGION1', 'NUCLEAR', 0.90)
+        """
+        self._validate_technology(region, technology)
+
+        # Build availability map
         if isinstance(availability, dict):
-            avail_years = sorted(availability.keys())
-            avail_map = {}
-            for y in self.years:
-                prev_years = [ay for ay in avail_years if ay <= y]
-                if prev_years:
-                    last_year = max(prev_years)
-                    avail_map[y] = availability[last_year]
-                else:
-                    first_year = min(avail_years)
-                    avail_map[y] = availability[first_year]
+            avail_map = self._step_interpolate_dict(availability)
         else:
+            if not 0 <= availability <= 1:
+                raise ValueError(f"Availability must be in [0, 1], got {availability}")
             avail_map = {y: availability for y in self.years}
 
-        # Availability factor
-        records = []
-        for y in self.years:
-            records.append({"REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": avail_map[y]})
-        self.availability_factor = self.add_to_dataframe(self.availability_factor, records,
-                                                            key_columns=["REGION", "TECHNOLOGY", "YEAR"])
-        
-    def set_residual_capacity(self, region, technology, capacity_trajectory: dict,
-                              interpolation='step'):
+        records = [
+            {"REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": avail_map[y]}
+            for y in self.years
+        ]
+
+        self.availability_factor = self.add_to_dataframe(
+            self.availability_factor, records,
+            key_columns=["REGION", "TECHNOLOGY", "YEAR"]
+        )
+
+    # =========================================================================
+    # Processing
+    # =========================================================================
+
+    def process(self) -> None:
         """
-        Define existing/legacy capacity for a given region and technology (capacity built before model start) over specified model years.
-        
-        :param region: str, Region where capacity exists
-        :param technology: str, Technology identifier
-        :param capacity_trajectory: dict, {year: capacity_MW/GW} known capacity points
-        :param interpolation: str, 'step' or 'linear', for interpolation between points
-        
-        Example::
-            # Existing coal capacity being phased out
-            supply.set_residual_capacity('Region1', 'COAL_OLD',
-                                         capacity_trajectory={2020: 15, 2030: 8, 2040: 2, 2050: 0},
-                                         interpolation='linear')
-            
-            # Nuclear fleet with scheduled retirements
-            supply.set_residual_capacity('Region1', 'NUCLEAR_GEN2',
-                                         capacity_trajectory={2020: 10, 2030: 10, 2040: 5},
-                                         interpolation='step')
+        Generate complete parameter DataFrames from assignments.
+
+        Processes capacity factor assignments into full timeslice profiles,
+        ensures defaults for missing data, and validates consistency.
+
+        Call after all user input methods and before save().
         """
-        # --- VALIDATION: Region, Technology, Trajectory, Interpolation ---
-        if region not in self.regions:
-            raise ValueError(f"Region '{region}' not defined in scenario. Set topology first.")
-        if (region, technology) not in self.defined_tech:
-            raise ValueError(f"Technology '{technology}' not registered in region '{region}'. Call add_technology() first.")
-        self.defined_tech.add((region, technology))
-        if len(capacity_trajectory) == 0:
-            raise ValueError(f"No capacity trajectory points provided for {region}-{technology}.")
-        for y, val in capacity_trajectory.items():
-            if val < 0:
-                raise ValueError(f"Residual capacity cannot be negative. Found {val} in model year {y} for {region}-{technology}.")
-        if interpolation not in ['step', 'linear']:
-            print(f"Interpolation method '{interpolation}' for {region}-{technology} not recognized. Using 'step' instead.")
-            interpolation = 'step'
+        self._validate_activity_ratios()
 
-        records = []
-        sorted_years = sorted(capacity_trajectory.keys())
-        # Preceding Years
-        first_yr = sorted_years[0]
-        first_val = capacity_trajectory[first_yr]
-        preceding_years = [y for y in self.years if y < first_yr]
-        for y in preceding_years:
-            records.append({
-                "REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": first_val
-            })
-        
-        # Interpolate
-        sorted_years = sorted(capacity_trajectory.keys())
-        for i in range(len(sorted_years) - 1):
-            y_start, y_end = sorted_years[i], sorted_years[i+1]
-            years_to_fill = [y for y in self.years if y_start <= y < y_end]
-            val_start, val_end = capacity_trajectory[y_start], capacity_trajectory[y_end]
-            
-            if interpolation == 'linear':
-                values = np.linspace(val_start, val_end, len(years_to_fill) + 1)[:-1]
-            else: # Step
-                values = [val_start] * len(years_to_fill)
-
-            for y, val in zip(years_to_fill, values):
-                records.append({
-                    "REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": val
-                })
-        
-        # Final Point
-        last_yr = sorted_years[-1]
-        last_val = capacity_trajectory[last_yr]
-        if last_yr in self.years:
-            records.append({
-                "REGION": region, "TECHNOLOGY": technology, "YEAR": last_yr, "VALUE": last_val
-            })
-
-        # Extrapolate if needed
-        remaining_years = [y for y in self.years if y > last_yr]
-        if remaining_years:
-            extrap_values = []
-            if interpolation == 'step':
-                extrap_values = [last_val] * len(remaining_years)
-            elif len(sorted_years) >= 2:
-                prev_yr = sorted_years[-2]
-                prev_val = capacity_trajectory[prev_yr]
-                y_diff = last_yr - prev_yr
-
-                if interpolation == 'linear':
-                    slope = (last_val - prev_val) / y_diff
-                    extrap_values = [last_val + slope * (y - last_yr) for y in remaining_years]
-            else: # Step
-                extrap_values = [last_val] * len(remaining_years)
-
-            for y, val in zip(remaining_years, extrap_values):
-                # Validate extrapolation didn't go negative
-                if val < 0:
-                    val = 0
-                records.append({
-                    "REGION": region, "TECHNOLOGY": technology, "YEAR": y, "VALUE": val
-                })
-
-        self.residual_capacity = self.add_to_dataframe(self.residual_capacity, records,
-                                                       key_columns=["REGION", "TECHNOLOGY", "YEAR"])
-            
-    def copy_technology(self, source_region, source_technology, 
-                        target_region, target_technology, scale_factor=1.0):
-        """
-        Copy all parameters from one technology to another (useful for similar technologies).
-        
-        :param source_region: str, Region of source technology
-        :param source_technology: str, Source technology identifier
-        :param target_region: str, Region for new technology
-        :param target_technology: str, New technology identifier
-        :param scale_factor: float, Scaling factor for all parameters (default 1.0)
-        
-        Example::
-            # Create similar wind technology in another region
-            supply.copy_technology('Region1', 'WIND_ONSHORE', 'Region2', 'WIND_ONSHORE')
-            
-            # Create upgraded version with 10% better efficiency
-            supply.copy_technology('Region1', 'SOLAR_PV_2020', 'Region1', 'SOLAR_PV_2030',
-                                  scale_factor=1.10)
-        """
-        pass
-
-    # === Processing ===
-    def process(self):
-        """
-        Generate and update all supply parameter DataFrames based on user-defined configurations.
-        This method:
-        0. Validates consistency of activity ratios
-        1. Processes capacity factor assignments into full timeslice profiles
-        2. Ensures all defined region-technology-year combinations have capacity factors
-        3. Ensures all defined region-technology-year combinations have availability factors
-        4. Updates all DataFrames for CSV output
-        
-        Should be called after all user input methods and before save().
-        """
-        self._validate_activity_ratio_consistency()
-
-        # Generate capacity factor profiles
-        all_cf_rows = []
-        for (region, technology, year), assignment in self.capacity_factor_assignments.items():
+        # Generate capacity factor rows
+        cf_rows = []
+        for (region, tech, year), assignment in self._capacity_factor_assignments.items():
             for ts, value in assignment["weights"].items():
-                all_cf_rows.append({
-                    "REGION": region, "TECHNOLOGY": technology, "TIMESLICE": ts, "YEAR": year, "VALUE": value
+                cf_rows.append({
+                    "REGION": region, "TECHNOLOGY": tech,
+                    "TIMESLICE": ts, "YEAR": year, "VALUE": value
                 })
-        
-        # Ensure all technologies have capacity factors (default to 1.0)
-        for region, technology in self.defined_tech:
+
+        # Default capacity factors (1.0) for missing assignments
+        for region, tech in self.defined_tech:
             for year in self.years:
-                if (region, technology, year) not in self.capacity_factor_assignments:
-                    for ts in self.time_axis["TIMESLICE"].unique():
-                        all_cf_rows.append({
-                            "REGION": region, "TECHNOLOGY": technology, "TIMESLICE": ts, "YEAR": year, "VALUE": 1.0
+                if (region, tech, year) not in self._capacity_factor_assignments:
+                    for ts in self.timeslices:
+                        cf_rows.append({
+                            "REGION": region, "TECHNOLOGY": tech,
+                            "TIMESLICE": ts, "YEAR": year, "VALUE": 1.0
                         })
-        self.capacity_factor = self.add_to_dataframe(self.capacity_factor, all_cf_rows,
-                                                     key_columns=["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR"])
-        
-        # Ensure all technologies have availability factors (default to 1.0)
-        all_af_rows = []
-        for region, technology in self.defined_tech:
+
+        self.capacity_factor = self.add_to_dataframe(
+            self.capacity_factor, cf_rows,
+            key_columns=["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR"]
+        )
+
+        # Default availability factors (1.0) for missing
+        af_rows = []
+        for region, tech in self.defined_tech:
             for year in self.years:
-                if not ((self.availability_factor["REGION"] == region) & 
-                    (self.availability_factor["TECHNOLOGY"] == technology) & 
-                    (self.availability_factor["YEAR"] == year)).any():
-                    all_af_rows.append({
-                        "REGION": region, "TECHNOLOGY": technology, "YEAR": year, "VALUE": 1.0
+                exists = (
+                    (self.availability_factor["REGION"] == region) &
+                    (self.availability_factor["TECHNOLOGY"] == tech) &
+                    (self.availability_factor["YEAR"] == year)
+                ).any()
+                if not exists:
+                    af_rows.append({
+                        "REGION": region, "TECHNOLOGY": tech, "YEAR": year, "VALUE": 1.0
                     })
-        self.availability_factor = self.add_to_dataframe(self.availability_factor, all_af_rows,
-                                                         key_columns=["REGION", "TECHNOLOGY", "YEAR"])
 
-    # === Internal Logic Helpers ===
-    def _apply_efficiency_to_ratios(self, efficiency, mode='MODE1'):
-        """
-        Convert efficiency value to input/output activity ratios.
-        For a technology with efficiency η:
-        - Input ratio = 1/η (amount of input needed per unit output)
-        - Output ratio = 1.0 (normalized)
-        
-        :param efficiency: float, Conversion efficiency (0-1)
-        :param mode: str, Mode identifier
-        :return: tuple (input_ratio, output_ratio)
-        """
-        if not (0 < efficiency <= 1):
-            raise ValueError(f"Efficiency must be in (0, 1], got {efficiency}.")
-        input_ratio = 1.0 / efficiency
-        output_ratio = 1.0
-        return input_ratio, output_ratio
-    
-    def _apply_timeslice_factors(self, factor_dict, default=1.0):
-        """
-        Applies timeslice factors.
-        If a timeslice is missing in factor_dict, it uses the default.
-        If a timeslice is present, it uses the provided factor.
-        Returns a complete dict of timeslice factors.
-        """
-        result = {}
-        for ts in self.time_axis["TIMESLICE"]:
-            val = factor_dict.get(ts, default)
-            if not 0 <= val <= 1:
-                raise ValueError(f"Capacity factor for timeslice '{ts}' must be in [0,1], got {val}.")
-            result[ts] = val
-        return result
-    
-    def _apply_hierarchical_factors(self, season_factor, day_factor, time_factor, default=1.0):
-        """
-        Applies hierarchical factors to generate timeslice factors.
-        If a season/day/time is missing in the respective factor dict, it uses the default.
-        If a season/day/time is present, it uses the provided factor.
-        Returns a complete dict of timeslice factors.
-        """
-        # Compute adjusted factors for each dimension
-        s_adj = {season: season_factor.get(season, default) for season in self.time_axis["Season"].unique()}
-        d_adj = {day: day_factor.get(day, default) for day in self.time_axis["DayType"].unique()}
-        t_adj = {time: time_factor.get(time, default) for time in self.time_axis["DailyTimeBracket"].unique()}
-        
-        result = {}
-        for _, ts_row in self.time_axis.iterrows():
-            ts = ts_row["TIMESLICE"]
-            s, d, t = ts_row["Season"], ts_row["DayType"], ts_row["DailyTimeBracket"]
-            val = s_adj[s] * d_adj[d] * t_adj[t]
+        self.availability_factor = self.add_to_dataframe(
+            self.availability_factor, af_rows,
+            key_columns=["REGION", "TECHNOLOGY", "YEAR"]
+        )
 
-            # Clamp to [0,1]
-            val = max(0.0, min(1.0, val))
-            result[ts] = val
-        return result
+    # =========================================================================
+    # Validation
+    # =========================================================================
 
-    def _validate_mode_configuration(self, modes_config):
+    def validate(self) -> None:
         """
-        Validate that multi-mode configuration is properly structured.
-        Checks:
-        - All modes have 'inputs' and 'outputs'
-        - Ratios are positive
-        - At least one output fuel is specified
-        """
-        if not isinstance(modes_config, dict):
-            raise ValueError("modes_config must be a dictionary of mode configurations.")
-        for mode, config in modes_config.items():
-            if not isinstance(config, dict):
-                raise ValueError(f"Configuration for mode '{mode}' must be a dictionary.")
-            if 'inputs' not in config or 'outputs' not in config:
-                raise ValueError(f"Mode '{mode}' must have both 'inputs' and 'outputs' keys.")
-            if not isinstance(config['inputs'], dict) or not isinstance(config['outputs'], dict):
-                raise ValueError(f"'inputs' and 'outputs' for mode '{mode}' must be dictionaries.")
-            # At least one output fuel
-            if not config['outputs']:
-                raise ValueError(f"Mode '{mode}' must specify at least one output fuel.")
-            # All ratios must be positive
-            for fuel, ratio in list(config['inputs'].items()) + list(config['outputs'].items()):
-                if not (isinstance(ratio, (int, float)) and ratio > 0):
-                    raise ValueError(f"Ratio for fuel '{fuel}' in mode '{mode}' must be a positive number.")
+        Validate supply component state.
 
-    def _compute_mode_activity_distribution(self, region, technology, modes):
+        Raises
+        ------
+        ValueError
+            If technologies have no outputs, modes inconsistent, or
+            activity ratios non-positive.
         """
-        Helper to track which modes are defined for a technology.
-        Used during process() to ensure all mode-specific parameters are consistent.
-        """
-        pass
+        self._validate_activity_ratios()
 
-    def _validate_activity_ratio_consistency(self):
-        """
-        Validate that input and output activity ratios are consistent:
-        - Every technology has at least one output
-        - Technologies with inputs also have outputs (except demand/sink technologies)
-        - Modes are consistently defined across input/output ratios
-        
-        Raises ValueError if inconsistencies found.
-        Should be called in process() before saving.
-        """
+    def _validate_activity_ratios(self) -> None:
+        """Validate activity ratio consistency."""
         errors = []
-        
-        # Check 1: Every technology must have at least one output
+
+        # Every technology needs at least one output
         if self.output_activity_ratio.empty:
-            errors.append("No output activity ratios defined for any technology.")
-            raise ValueError("\n".join(errors))
-        
-        techs_with_outputs = set(
-            zip(self.output_activity_ratio['REGION'], 
-                self.output_activity_ratio['TECHNOLOGY'])
-        )
-        
-        for region, technology in self.defined_tech:
-            if (region, technology) not in techs_with_outputs:
-                errors.append(
-                    f"Technology '{technology}' in region '{region}' has no output activity ratios defined."
-                )
-        
-        # Check 2: Every input mode must have corresponding outputs
-        if not self.input_activity_ratio.empty:
-            for region, technology in self.defined_tech:
-                input_modes = self.input_activity_ratio[
-                    (self.input_activity_ratio['REGION'] == region) & 
-                    (self.input_activity_ratio['TECHNOLOGY'] == technology)
-                ]['MODE_OF_OPERATION'].unique()
-                
-                output_modes = self.output_activity_ratio[
-                    (self.output_activity_ratio['REGION'] == region) & 
-                    (self.output_activity_ratio['TECHNOLOGY'] == technology)
-                ]['MODE_OF_OPERATION'].unique()
-                
-                # Every input mode must have outputs
-                for mode in input_modes:
-                    if mode not in output_modes:
-                        errors.append(
-                            f"Technology '{technology}' in region '{region}' has mode '{mode}' "
-                            f"with inputs but no outputs."
-                        )
-        
-        # Check 3: Validate ratio values are positive
-        if not self.input_activity_ratio.empty and (self.input_activity_ratio['VALUE'] <= 0).any():
-            negative_inputs = self.input_activity_ratio[self.input_activity_ratio['VALUE'] <= 0]
-            for _, row in negative_inputs.iterrows():
-                errors.append(
-                    f"Non-positive input activity ratio: {row['TECHNOLOGY']} in {row['REGION']}, "
-                    f"fuel {row['FUEL']}, mode {row['MODE_OF_OPERATION']}, year {row['YEAR']}: {row['VALUE']}"
-                )
-        
-        if not self.output_activity_ratio.empty and (self.output_activity_ratio['VALUE'] <= 0).any():
-            negative_outputs = self.output_activity_ratio[self.output_activity_ratio['VALUE'] <= 0]
-            for _, row in negative_outputs.iterrows():
-                errors.append(
-                    f"Non-positive output activity ratio: {row['TECHNOLOGY']} in {row['REGION']}, "
-                    f"fuel {row['FUEL']}, mode {row['MODE_OF_OPERATION']}, year {row['YEAR']}: {row['VALUE']}"
-                )
-        
-        # Raise aggregated errors
-        if errors:
-            error_msg = "Activity ratio consistency validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
-            raise ValueError(error_msg)
-        
-        return True
-    
-    # === Visualization ===
-    def visualize_technologies(self):
-        pass
-        
-    def visualize_capacity_mix(self):
-        """
-        Visualize the technology capacity mix for all regions.
-        Creates a stacked bar chart showing capacity composition of legacy infrastructure over time.
-        """
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-        import numpy as np
-
-        # --- Styles ---
-        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00'][::-1]
-        HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
-        plt.rcParams.update({
-            'font.size': 14, 
-            'text.color': 'black',
-            'axes.labelcolor': 'black',
-            'xtick.color': 'black',
-            'ytick.color': 'black',
-            'font.family': 'sans-serif'
-        })
-        
-        # --- Load Data ---
-        self.load()
-        regions = sorted(self.residual_capacity['REGION'].unique())
-        n_regions = len(regions)
-        years = self.years
-
-        all_techs = sorted(self.residual_capacity['TECHNOLOGY'].unique())
-        all_fuels = sorted(self.output_activity_ratio['FUEL'].unique())
-
-        # --- Process Data ---
-        tech_to_fuel = {}
-        for tech in all_techs:
-            fuels = self.output_activity_ratio[self.output_activity_ratio['TECHNOLOGY'] == tech]['FUEL']
-            if not fuels.empty:
-                tech_to_fuel[tech] = fuels.value_counts().idxmax()
-            else:
-                tech_to_fuel[tech] = 'Unknown'
-
-        tech_to_color = {tech: CB_PALETTE[i % len(CB_PALETTE)] for i, tech in enumerate(all_techs)}
-        fuel_to_hatch = {fuel: HATCHES[i % len(HATCHES)] for i, fuel in enumerate(all_fuels)}
-
-        # --- Plotting ---
-        fig, axes = plt.subplots(nrows=n_regions, ncols=1, figsize=(12, 4.5 * n_regions), sharey=True)
-        if n_regions == 1:
-            axes = [axes]
-        
-        for idx, region in enumerate(regions):
-            ax = axes[idx]
-            df_capacity = self.residual_capacity[self.residual_capacity['REGION'] == region].copy()
-            df_capacity['PRIMARY OUTPUT FUEL'] = df_capacity['TECHNOLOGY'].map(tech_to_fuel)
-            df_pivot = df_capacity.pivot_table(
-                index='YEAR', columns='TECHNOLOGY', values='VALUE', aggfunc='sum', fill_value=0
-            ).reindex(index=years, columns=all_techs, fill_value=0)
-
-            bottom = np.zeros(len(df_pivot))
-            for i, tech in enumerate(all_techs):
-                hatch = fuel_to_hatch.get(tech_to_fuel[tech], '')
-                bar = ax.bar(
-                    df_pivot.index,
-                    df_pivot[tech],
-                    bottom=bottom,
-                    color=tech_to_color[tech],
-                    label=tech,
-                    hatch=hatch,
-                    edgecolor='black'
-                )
-                bottom += df_pivot[tech].values
-
-            ax.set_ylabel("Installed Capacity (Model Units)")
-            ax.set_title(f"Region: {region}")
-            ax.set_xticks(df_pivot.index)
-            ax.set_xticklabels(df_pivot.index, rotation=0)
-            ax.grid(axis='y', linestyle='--', alpha=0.5)
-            if idx == n_regions - 1:
-                ax.set_xlabel("Year")
-            else:
-                ax.set_xlabel("")
-
-        # --- Formatting ---
-        tech_handles = [
-            mpatches.Patch(facecolor=tech_to_color[tech], edgecolor='black', label=tech)
-            for tech in all_techs
-        ]
-        fuel_handles = [
-            mpatches.Patch(facecolor='white', edgecolor='black', label=fuel, hatch=fuel_to_hatch[fuel])
-            for fuel in all_fuels
-        ]
-        handles = tech_handles + fuel_handles
-        labels = [h.get_label() for h in handles]
-        fig.legend(
-            handles, labels,
-            title="Technology (color) / Output Fuel (hatch)",
-            loc='upper center', bbox_to_anchor=(0.5, 1.04),
-            ncol=min(len(handles), 5), frameon=False, handleheight=2.0, handlelength=3.0
-        )
-
-        plt.tight_layout(rect=[0, 0, 1, 0.97])
-        plt.show()
-
-    def visualize_potential(self, region, fuel, legend=True):
-        """
-        Visualize generation/activity profile across timeslices for technologies.
-        Shows how capacity factors and availability affect generation patterns.
-        
-        :param region: str, Region to visualize
-        :param fuel: str, Output fuel to filter technologies
-        :param legend: bool, Show legend
-        :param ax: matplotlib axis object or None
-        
-        Creates visualization showing:
-        - Installed capacity
-        - Available capacity (after availability factor)
-        - Actual generation potential (after capacity factor)
-        """
-        import matplotlib.pyplot as plt
-
-        # --- Styles ---
-        COLOR = ['darkslategrey']
-        CB_PALETTE = ['#56B4E9', '#D55E00', '#009E73', '#F0E442', '#0072B2', '#CC79A7', '#E69F00']
-        HATCHES = ['', '//', '..', 'xx', '++', '**', 'OO']
-        plt.rcParams.update({
-            'font.size': 14, 
-            'text.color': 'black',
-            'axes.labelcolor': 'black',
-            'xtick.color': 'black',
-            'ytick.color': 'black',
-            'font.family': 'sans-serif'
-        })
-
-        # --- Load Data ---
-        self.load()
-
-        techs = self.output_activity_ratio[
-            (self.output_activity_ratio['REGION'] == region) &
-            (self.output_activity_ratio['FUEL'] == fuel)
-        ]['TECHNOLOGY'].unique()
-
-        residual_techs = self.residual_capacity[
-            (self.residual_capacity['REGION'] == region) &
-            (self.residual_capacity['TECHNOLOGY'].isin(techs))
-        ]['TECHNOLOGY'].unique()
-        techs_sorted = list(residual_techs) + [t for t in techs if t not in residual_techs]
-        n_techs = len(techs_sorted)
-        if n_techs == 0:
-            print(f"No technologies producing '{fuel}' in region '{region}'.")
-            return
-        
-        # --- Process Data ---
-        data = []
-        seasons = set()
-        daytypes = set()
-        timebrackets = set()
-
-        for ts in self.time_axis['TIMESLICE'].unique():
-            row = self.time_axis.loc[self.time_axis['TIMESLICE'] == ts].iloc[0]
-            season, daytype, timebracket = row['Season'], row['DayType'], row['DailyTimeBracket']
-
-            seasons.add(season)
-            daytypes.add(daytype)
-            timebrackets.add(timebracket)
-
-            data.append({"ts": ts, "season": season, "daytype": daytype, "timebracket": timebracket})
-
-        dt_style_map = {d: CB_PALETTE[i % len(CB_PALETTE)] for i, d in enumerate(sorted(daytypes))}
-        tb_hatch_map = {b: HATCHES[i % len(HATCHES)] for i, b in enumerate(sorted(timebrackets))}
-
-        fig, axes = plt.subplots(nrows=n_techs, ncols=1, figsize=(12, 7 * n_techs),
-                                 sharex=True, sharey=True)
-        if n_techs == 1:
-            ax = [axes]
+            if self.defined_tech:
+                errors.append("No output activity ratios defined for any technology")
         else:
-            ax = axes.flatten()
-        
-        # --- Plotting ---
-        for t, tech in enumerate(techs_sorted):
-            df_res = self.residual_capacity[
-                (self.residual_capacity['REGION'] == region) &
-                (self.residual_capacity['TECHNOLOGY'] == tech)
-            ]
-            df_avail = self.availability_factor[
-                (self.availability_factor['REGION'] == region) &
-                (self.availability_factor['TECHNOLOGY'] == tech)
-            ]
-            df_cap = self.capacity_factor[
-                (self.capacity_factor['REGION'] == region) &
-                (self.capacity_factor['TECHNOLOGY'] == tech)
-            ]
-            merged = pd.merge(df_avail, df_cap, on='YEAR')
-            merged['AVAIL x CAP'] = merged['VALUE_x'] * merged['VALUE_y']
-
-            plot_data = merged.pivot(index='YEAR', columns='TIMESLICE', values='VALUE_y') # AVAIL x CAP
-            plot_data = plot_data.reindex(sorted(plot_data.columns), axis=1)
-
-            bottoms = df_res.set_index('YEAR')['VALUE'].reindex(plot_data.index, fill_value=0).values
-            years_x = plot_data.index.astype(str)
-            # Add residual capacity
-            ax[t].bar(years_x, bottoms, color=COLOR[0], edgecolor='white', linewidth=0.5, alpha=0.1)
-
-            legend_handles = {}
-            for d in data:
-                values = plot_data[d['ts']].fillna(0).values
-                color = dt_style_map[d['daytype']]
-                hatch = tb_hatch_map[d['timebracket']]
-                legend_key = f"{d['daytype']} | {d['timebracket']}"
-                # Only add a handle for each (daytype, timebracket) combo once
-                bar = ax[t].bar(
-                    years_x, values, bottom=bottoms,
-                    label=None, color=color, hatch=hatch,
-                    edgecolor='white', linewidth=0.5
+            techs_with_outputs = set(
+                zip(
+                    self.output_activity_ratio['REGION'],
+                    self.output_activity_ratio['TECHNOLOGY']
                 )
-                if legend_key not in legend_handles:
-                    legend_handles[legend_key] = bar[0]
-                bottoms += values
-            
-            # --- Formatting ---
-            ax[t].set_ylabel(f"{tech} Generation Potential (Model Units)")
-            ax[t].set_title(f"Generation Profile: {region} - {tech} ({fuel})")
+            )
+            for region, tech in self.defined_tech:
+                if (region, tech) not in techs_with_outputs:
+                    errors.append(f"Technology '{tech}' in '{region}' has no outputs")
 
-            # Custom legend: only show daytype and timebracket
-            if legend:
-                handles = list(legend_handles.values())
-                labels = list(legend_handles.keys())
-                if len(handles) > 10:
-                    ax[t].legend(handles, labels, title="Daytype | Timebracket", bbox_to_anchor=(1.05, 1), loc='upper left')
-                else:
-                    ax[t].legend(handles, labels, title="Daytype | Timebracket", loc='best')
+        # Check for non-positive ratios
+        for df_name, df in [
+            ('InputActivityRatio', self.input_activity_ratio),
+            ('OutputActivityRatio', self.output_activity_ratio)
+        ]:
+            if not df.empty and (df['VALUE'] <= 0).any():
+                bad = df[df['VALUE'] <= 0]
+                for _, row in bad.iterrows():
+                    errors.append(
+                        f"Non-positive {df_name}: {row['TECHNOLOGY']} year {row['YEAR']}"
+                    )
 
-        plt.grid(axis='y', linestyle='--', alpha=0.3)
-        plt.tight_layout()
-        plt.show()
+        if errors:
+            raise ValueError("Activity ratio validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
-    def visualize_fuel_balance(self, region, fuel, year, ax=None):
-        """
-        Visualize supply-side fuel balance for a specific fuel across timeslices.
-        Shows which technologies are producing/consuming the fuel.
-        
-        :param region: str, Region to visualize
-        :param fuel: str, Fuel to analyze
-        :param year: int, Year to visualize
-        :param ax: matplotlib axis object or None
-        
-        Creates stacked area plot showing:
-        - Production by technology
-        - Consumption by technology
-        - Net balance
-        """
-        pass
+    def _validate_technology(self, region: str, technology: str) -> None:
+        """Validate technology is registered."""
+        if region not in self.regions:
+            raise ValueError(f"Region '{region}' not defined")
+        if (region, technology) not in self.defined_tech:
+            raise ValueError(
+                f"Technology '{technology}' not registered in '{region}'. "
+                "Call add_technology() first."
+            )
+
+    def _validate_modes_config(self, modes_config: Dict) -> None:
+        """Validate multi-mode configuration structure."""
+        if not isinstance(modes_config, dict):
+            raise ValueError("modes_config must be a dictionary")
+
+        for mode, config in modes_config.items():
+            if 'outputs' not in config or not config['outputs']:
+                raise ValueError(f"Mode '{mode}' must specify at least one output")
+
+            for fuel, ratio in list(config.get('inputs', {}).items()) + list(config.get('outputs', {}).items()):
+                if not isinstance(ratio, (int, float)) or ratio <= 0:
+                    raise ValueError(f"Ratio for '{fuel}' in mode '{mode}' must be positive")
+
+    # =========================================================================
+    # Internal Helpers
+    # =========================================================================
+
+    def _load_time_axis(self) -> pd.DataFrame:
+        """Load time axis data from TimeComponent."""
+        time_data = TimeComponent.load_time_axis(self)
+        df = time_data['yearsplit'].copy()
+        slice_map = time_data['slice_map']
+
+        df['Season'] = df['TIMESLICE'].map(lambda x: slice_map[x]['Season'])
+        df['DayType'] = df['TIMESLICE'].map(lambda x: slice_map[x]['DayType'])
+        df['DailyTimeBracket'] = df['TIMESLICE'].map(lambda x: slice_map[x]['DailyTimeBracket'])
+        return df
+
+    def _rebuild_fuels_and_modes(self) -> None:
+        """Rebuild tracking sets from loaded DataFrames."""
+        self.defined_fuels = set()
+        if not self.input_activity_ratio.empty:
+            self.defined_fuels.update(self.input_activity_ratio['FUEL'].unique())
+        if not self.output_activity_ratio.empty:
+            self.defined_fuels.update(self.output_activity_ratio['FUEL'].unique())
+
+        self._mode_definitions = {}
+        for df in [self.input_activity_ratio, self.output_activity_ratio]:
+            if not df.empty:
+                for _, row in df.iterrows():
+                    key = (row['REGION'], row['TECHNOLOGY'])
+                    if key not in self._mode_definitions:
+                        self._mode_definitions[key] = []
+                    mode = row['MODE_OF_OPERATION']
+                    if mode not in self._mode_definitions[key]:
+                        self._mode_definitions[key].append(mode)
+
+    def _register_mode(self, region: str, technology: str, mode: str) -> None:
+        """Register a mode for a technology."""
+        key = (region, technology)
+        if key not in self._mode_definitions:
+            self._mode_definitions[key] = []
+        if mode not in self._mode_definitions[key]:
+            self._mode_definitions[key].append(mode)
+
+    def _resolve_years(self, years: Optional[Union[int, List[int]]]) -> List[int]:
+        """Resolve years argument to list."""
+        if years is None:
+            return self.years
+        elif isinstance(years, int):
+            return [years]
+        return years
+
+    def _efficiency_to_ratios(self, efficiency: float) -> Tuple[float, float]:
+        """Convert efficiency to (input_ratio, output_ratio)."""
+        if not 0 < efficiency <= 1:
+            raise ValueError(f"Efficiency must be in (0, 1], got {efficiency}")
+        return 1.0 / efficiency, 1.0
+
+    def _build_efficiency_map(self, efficiency: Union[float, Dict[int, float]]) -> Dict[int, float]:
+        """Build year -> efficiency mapping with step interpolation."""
+        if isinstance(efficiency, (int, float)):
+            if not 0 < efficiency <= 1:
+                raise ValueError(f"Efficiency must be in (0, 1], got {efficiency}")
+            return {y: efficiency for y in self.years}
+
+        for y, val in efficiency.items():
+            if not 0 < val <= 1:
+                raise ValueError(f"Efficiency for year {y} must be in (0, 1]")
+
+        return self._step_interpolate_dict(efficiency)
+
+    def _step_interpolate_dict(self, data: Dict[int, float]) -> Dict[int, float]:
+        """Step-interpolate a {year: value} dict to cover all model years."""
+        sorted_years = sorted(data.keys())
+        result = {}
+
+        for y in self.years:
+            prev_years = [ey for ey in sorted_years if ey <= y]
+            if prev_years:
+                result[y] = data[max(prev_years)]
+            else:
+                result[y] = data[min(sorted_years)]
+
+        return result
+
+    def _interpolate_trajectory(
+        self,
+        base_record: Dict,
+        trajectory: Dict[int, float],
+        method: str
+    ) -> List[Dict]:
+        """Interpolate trajectory to all model years."""
+        records = []
+        sorted_years = sorted(trajectory.keys())
+        first_yr, last_yr = sorted_years[0], sorted_years[-1]
+
+        # Before first point
+        for y in [yr for yr in self.years if yr < first_yr]:
+            records.append({**base_record, "YEAR": y, "VALUE": trajectory[first_yr]})
+
+        # Between points
+        for i in range(len(sorted_years) - 1):
+            y_start, y_end = sorted_years[i], sorted_years[i + 1]
+            v_start, v_end = trajectory[y_start], trajectory[y_end]
+            years_to_fill = [yr for yr in self.years if y_start <= yr < y_end]
+
+            if method == 'linear':
+                values = np.linspace(v_start, v_end, len(years_to_fill) + 1)[:-1]
+            else:
+                values = [v_start] * len(years_to_fill)
+
+            for yr, val in zip(years_to_fill, values):
+                records.append({**base_record, "YEAR": yr, "VALUE": val})
+
+        # Last point
+        if last_yr in self.years:
+            records.append({**base_record, "YEAR": last_yr, "VALUE": trajectory[last_yr]})
+
+        # After last point
+        for y in [yr for yr in self.years if yr > last_yr]:
+            records.append({**base_record, "YEAR": y, "VALUE": max(0, trajectory[last_yr])})
+
+        return records
+
+    def _apply_timeslice_weights(
+        self,
+        weights: Dict[str, float],
+        default: float = 1.0
+    ) -> Dict[str, float]:
+        """Apply timeslice-level weights, clamping to [0, 1]."""
+        result = {}
+        for ts in self.timeslices:
+            val = weights.get(ts, default)
+            result[ts] = max(0.0, min(1.0, val))
+        return result
+
+    def _apply_hierarchical_weights(
+        self,
+        season_w: Dict[str, float],
+        daytype_w: Dict[str, float],
+        bracket_w: Dict[str, float],
+        default: float = 1.0
+    ) -> Dict[str, float]:
+        """Apply hierarchical weights (season × daytype × bracket)."""
+        # Build lookup dicts with defaults
+        s_adj = {s: season_w.get(s, default) for s in self._time_axis["Season"].unique()}
+        d_adj = {d: daytype_w.get(d, default) for d in self._time_axis["DayType"].unique()}
+        t_adj = {t: bracket_w.get(t, default) for t in self._time_axis["DailyTimeBracket"].unique()}
+
+        result = {}
+        for _, row in self._time_axis.drop_duplicates(subset=['TIMESLICE']).iterrows():
+            ts = row["TIMESLICE"]
+            val = s_adj[row["Season"]] * d_adj[row["DayType"]] * t_adj[row["DailyTimeBracket"]]
+            result[ts] = max(0.0, min(1.0, val))
+
+        return result
+
+    # =========================================================================
+    # Representation
+    # =========================================================================
+
+    def __repr__(self) -> str:
+        return (
+            f"SupplyComponent(scenario_dir='{self.scenario_dir}', "
+            f"technologies={len(self.defined_tech)}, fuels={len(self.defined_fuels)})"
+        )

@@ -1,3 +1,7 @@
+# pyoscomp/scenario/core.py
+
+from typing import Optional
+
 from .components.topology import TopologyComponent
 from .components.time import TimeComponent
 from .components.demand import DemandComponent
@@ -5,12 +9,14 @@ from .components.supply import SupplyComponent
 from .components.economics import EconomicsComponent
 from .components.performance import PerformanceComponent
 from .validation.cross_reference import validate_scenario
+from ..interfaces import ScenarioData
+
 
 class Scenario:
     """
     Scenario class for orchestrating all scenario components and ensuring cross-component reference integrity.
     """
-    def __init__(self, scenario_dir):
+    def __init__(self, scenario_dir: str):
         """
         Initialize all scenario components and store the scenario directory path.
 
@@ -30,7 +36,7 @@ class Scenario:
         # self.storage = StorageComponent(scenario_dir)  # Future component
 
 
-    def build(self):
+    def build(self, return_data: bool = False) -> Optional[ScenarioData]:
         """
         Finalize the scenario logic: load, process, validate, and save all components.
         Runs cross-component reference validation after processing.
@@ -60,3 +66,7 @@ class Scenario:
             raise ValueError(f"Scenario validation failed: {e}")
 
         print(f"Scenario built successfully in: {self.scenario_dir}")
+
+        if return_data:
+            return ScenarioData.from_directory(self.scenario_dir)
+        return None
