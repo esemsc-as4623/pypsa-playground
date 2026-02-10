@@ -10,7 +10,7 @@ functions for year/date calculations used throughout the time translation.
 from datetime import time
 import calendar
 
-# Tolerance for floating point comparisons (in hours)
+# Tolerance for floating point comparisons
 TOL = 1e-8
 
 # Microsecond precision for representing "end of day" timestamp
@@ -18,6 +18,9 @@ TIMEPRECISION = 999999
 
 # End of day: 23:59:59.999999 (inclusive upper bound for daily brackets)
 ENDOFDAY = time(23, 59, 59, TIMEPRECISION)
+
+# Hours per day
+HOURS_PER_DAY = 24
 
 # Hours per year (non-leap and leap)
 HOURS_PER_YEAR = 8760
