@@ -4,7 +4,7 @@ from .components.demand import DemandComponent
 from .components.supply import SupplyComponent
 from .components.economics import EconomicsComponent
 from .components.performance import PerformanceComponent
-from .validation.reference import validate_column_reference, validate_multi_column_reference
+from .validation.cross_reference import validate_scenario
 
 class Scenario:
     """
@@ -29,6 +29,7 @@ class Scenario:
         # self.performance = PerformanceComponent(scenario_dir, self.supply)
         # self.storage = StorageComponent(scenario_dir)  # Future component
 
+
     def build(self):
         """
         Finalize the scenario logic: load, process, validate, and save all components.
@@ -45,9 +46,6 @@ class Scenario:
         self.demand.process()
         self.supply.process()
 
-        # Cross-component reference validation
-        self.validate_references()
-
         # Save all components
         self.topology.save()
         self.time.save()
@@ -55,29 +53,10 @@ class Scenario:
         self.supply.save()
         self.economics.save()
 
+        # Cross-component reference validation (after all saves)
+        try:
+            validate_scenario(self.scenario_dir)
+        except Exception as e:
+            raise ValueError(f"Scenario validation failed: {e}")
+
         print(f"Scenario built successfully in: {self.scenario_dir}")
-
-    def validate_references(self):
-        """
-        Validate cross-component references to ensure all IDs used in one component exist in the relevant set files.
-        Raises SchemaError if any reference is invalid.
-
-        Checks performed:
-        - TECHNOLOGYs in supply exist in TECHNOLOGY.csv
-        - FUELs in supply exist in FUEL.csv
-        - REGIONs in demand/supply exist in REGION.csv
-        - (Extend as needed for other cross-references)
-        """
-        # TECHNOLOGY reference check
-        if hasattr(self.supply, 'supply_df') and hasattr(self.topology, 'technology_df'):
-            validate_column_reference(self.supply.supply_df, self.topology.technology_df, 'TECHNOLOGY', 'TECHNOLOGY', error_type="TECHNOLOGY ReferenceError")
-        # FUEL reference check
-        if hasattr(self.supply, 'supply_df') and hasattr(self.topology, 'fuel_df'):
-            validate_column_reference(self.supply.supply_df, self.topology.fuel_df, 'FUEL', 'FUEL', error_type="FUEL ReferenceError")
-        # REGION reference check (demand)
-        if hasattr(self.demand, 'annual_demand_df') and hasattr(self.topology, 'region_df'):
-            validate_column_reference(self.demand.annual_demand_df, self.topology.region_df, 'REGION', 'VALUE', error_type="REGION ReferenceError")
-        # REGION reference check (supply)
-        if hasattr(self.supply, 'supply_df') and hasattr(self.topology, 'region_df'):
-            validate_column_reference(self.supply.supply_df, self.topology.region_df, 'REGION', 'VALUE', error_type="REGION ReferenceError")
-        # Extend with more checks as needed

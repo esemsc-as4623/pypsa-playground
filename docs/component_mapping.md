@@ -24,7 +24,7 @@ This document defines which pyoscomp scenario component is responsible for each 
 | **DemandComponent** | Energy demand and load profiles | ✅ Implemented |
 | **SupplyComponent** | Technology registry and metadata | ✅ Implemented |
 | **EconomicsComponent** | Costs and discount rates | ✅ Implemented |
-| **PerformanceComponent** | Technology operational characteristics | ⚠️ Partial (P1.3) |
+| **PerformanceComponent** | Technology operational characteristics | ⚠️ Partial |
 | **StorageComponent** | Storage facilities and parameters | ❌ Not implemented |
 | **EmissionsComponent** | Emissions and environmental constraints | ❌ Not implemented |
 | **TargetsComponent** | Policy targets and capacity constraints | ❌ Not implemented |
