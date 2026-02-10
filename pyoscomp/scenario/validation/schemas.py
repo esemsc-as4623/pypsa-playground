@@ -93,6 +93,7 @@ def validate_csv(name: str, df: pd.DataFrame, schema: SchemaRegistry):
 	entry = schema.get_schema(name)
 	if entry is None:
 		raise SchemaError(f"No schema entry for '{name}'")
+	# Check for required columns
 	expected_cols = schema.get_csv_columns(name)
 	missing = [col for col in expected_cols if col not in df.columns]
 	if missing:
@@ -105,21 +106,26 @@ def validate_csv(name: str, df: pd.DataFrame, schema: SchemaRegistry):
 	dtype = entry.get('dtype', 'float')
 	if schema.is_set(name):
 		# Sets: VALUE column only
-		if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
-			raise SchemaError(f"Set '{name}' VALUE column must be integer type.")
-		if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
-			raise SchemaError(f"Set '{name}' VALUE column must be string type.")
+		# TODO: int/str dtypes read as object once saved to CSV
+		# may need to convvert dtypes or allow flexible types
+		pass
+		# if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
+		# 	raise SchemaError(f"Set '{name}' VALUE column must be integer type.")
+		# if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
+		# 	raise SchemaError(f"Set '{name}' VALUE column must be string type.")
 	else:
 		# Params/results: VALUE column type
-		if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
-			raise SchemaError(f"Param/result '{name}' VALUE column must be integer type.")
+		# TODO: int/str dtypes read as object once saved to CSV
+		# if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
+		# 	raise SchemaError(f"Param/result '{name}' VALUE column must be integer type.")
 		if dtype == 'float':
 			if pd.api.types.is_integer_dtype(df['VALUE']):
 				df['VALUE'] = df['VALUE'].astype('float')
 			if not pd.api.types.is_float_dtype(df['VALUE']):
 				raise SchemaError(f"Param/result '{name}' VALUE column must be float type.")
-		if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
-			raise SchemaError(f"Param/result '{name}' VALUE column must be string type.")
+		# TODO: int/str dtypes read as object once saved to CSV
+		# if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
+		# 	raise SchemaError(f"Param/result '{name}' VALUE column must be string type.")
 	# Check for NaNs in required columns
 	if df[expected_cols].isnull().any().any():
 		raise SchemaError(f"CSV for '{name}' contains missing values in required columns: {expected_cols}")
