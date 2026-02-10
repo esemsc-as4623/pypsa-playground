@@ -120,13 +120,19 @@ supply.add_technology(...).with_conversion(...).with_bounds(...).build()
 
 ## Prioritized Task List
 
+### Priority 1: Visualization Module
+*Goal: Create visualizations to aid in scenario building*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P1.1** | | | |
+
 ### Priority 2: Validation & Robustness
 *Goal: Prevent silent failures and catch errors early*
 
 | ID | Task | Description | Files Affected |
 |----|------|-------------|----------------|
 | **P2.3** | Standardize error handling | Replace all `print("WARNING")` with proper logging. Define when to warn vs raise. | All component files |
-| **P2.4** | Add unit tests for scenario components | Test each component's `add_*`, `set_*`, `load()`, `save()` methods | `tests/test_scenario/test_*.py` |
 
 ### Priority 3: Translation Pipeline
 *Goal: Reliable conversion between OSeMOSYS CSVs and PyPSA Network*
