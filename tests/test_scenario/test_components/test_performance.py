@@ -15,8 +15,6 @@ import os
 import pytest
 import pandas as pd
 
-from pyoscomp.scenario.components.topology import TopologyComponent
-from pyoscomp.scenario.components.time import TimeComponent
 from pyoscomp.scenario.components.supply import SupplyComponent
 from pyoscomp.scenario.components.performance import PerformanceComponent
 
@@ -119,7 +117,7 @@ class TestCapacityFactorDelegation:
         perf = PerformanceComponent(complete_scenario_dir)
 
         with pytest.raises(NotImplementedError, match="No SupplyComponent"):
-            perf.set_capacity_factor('REGION1', 'SOLAR_PV', values=0.25)
+            perf.set_capacity_factor(region='REGION1', technology='SOLAR_PV', bracket_weights={'Day': 0.25, 'Night': 0})
 
     def test_delegate_with_supply_calls_supply(self, complete_scenario_dir):
         """set_capacity_factor delegates to supply component."""
@@ -127,10 +125,10 @@ class TestCapacityFactorDelegation:
         perf = PerformanceComponent(complete_scenario_dir, supply)
 
         # Register technology first
-        supply.add_technology('SOLAR_PV')
+        supply.add_technology(region='REGION1', technology='SOLAR_PV', operational_life=30)
 
         # Call through facade
-        perf.set_capacity_factor('REGION1', 'SOLAR_PV', values=0.25)
+        perf.set_capacity_factor(region='REGION1', technology='SOLAR_PV', bracket_weights={'Day': 0.25, 'Night': 0})
 
         # Verify values were set via supply
         df = supply.capacity_factor
@@ -158,7 +156,7 @@ class TestAvailabilityFactorDelegation:
         perf = PerformanceComponent(complete_scenario_dir, supply)
 
         # Register technology first
-        supply.add_technology('GAS_CCGT')
+        supply.add_technology(region='REGION1', technology='GAS_CCGT', operational_life=20)
 
         # Call through facade
         perf.set_availability_factor('REGION1', 'GAS_CCGT', 0.9)
@@ -212,15 +210,15 @@ class TestPerformanceIntegration:
         perf = PerformanceComponent(complete_scenario_dir, supply)
 
         # Register technologies via supply
-        supply.add_technology('SOLAR_PV')
-        supply.add_technology('WIND')
+        supply.add_technology(region='REGION1', technology='SOLAR_PV', operational_life=30)
+        supply.add_technology(region='REGION1', technology='WIND', operational_life=25)
 
         # Set performance via facade
-        perf.set_capacity_factor('REGION1', 'SOLAR_PV', values=0.2)
-        perf.set_availability_factor('REGION1', 'SOLAR_PV', 0.95)
+        perf.set_capacity_factor(region='REGION1', technology='SOLAR_PV', bracket_weights={'Day': 0.2, 'Night': 0})
+        perf.set_availability_factor(region='REGION1', technology='SOLAR_PV', availability=0.95)
 
-        perf.set_capacity_factor('REGION1', 'WIND', values=0.3)
-        perf.set_availability_factor('REGION1', 'WIND', 0.92)
+        perf.set_capacity_factor(region='REGION1', technology='WIND', season_weights={'Summer': 0.3, 'Winter': 0.7})
+        perf.set_availability_factor(region='REGION1', technology='WIND', availability=0.92)
 
         # Save via supply (facade save is no-op)
         supply.save()
@@ -245,13 +243,13 @@ class TestPerformanceIntegration:
 
         # Mutations should raise
         with pytest.raises(NotImplementedError):
-            perf.set_efficiency('REGION1', 'TECH', 0.5)
+            perf.set_efficiency(region='REGION1', technology='TECH', efficiency=0.5)
 
         with pytest.raises(NotImplementedError):
-            perf.set_capacity_factor('REGION1', 'TECH', values=0.5)
+            perf.set_capacity_factor(region='REGION1', technology='TECH', daytype_weights={'AllDays': 0.5})
 
         with pytest.raises(NotImplementedError):
-            perf.set_availability_factor('REGION1', 'TECH', 0.9)
+            perf.set_availability_factor(region='REGION1', technology='TECH', availability=0.9)
 
     def test_supply_assignment_enables_mutations(self, complete_scenario_dir):
         """Assigning supply enables mutation methods."""
@@ -259,15 +257,15 @@ class TestPerformanceIntegration:
 
         # Initially raises
         with pytest.raises(NotImplementedError):
-            perf.set_availability_factor('REGION1', 'TECH', 0.9)
+            perf.set_availability_factor(region='REGION1', technology='TECH', availability=0.9)
 
         # Assign supply
         supply = SupplyComponent(complete_scenario_dir)
-        supply.add_technology('TECH')
+        supply.add_technology(region='REGION1', technology='TECH', operational_life=20)
         perf.supply = supply
 
         # Now works
-        perf.set_availability_factor('REGION1', 'TECH', 0.9)
+        perf.set_availability_factor(region='REGION1', technology='TECH', availability=0.9)
 
         df = supply.availability_factor
         assert len(df) > 0

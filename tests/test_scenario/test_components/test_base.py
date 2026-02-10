@@ -18,7 +18,7 @@ import pandas as pd
 from pathlib import Path
 
 from pyoscomp.scenario.components.base import ScenarioComponent
-from pyoscomp.scenario.components.topology import TopologyComponent
+from pyoscomp.scenario.validation.schemas import SchemaError
 
 
 # =============================================================================
@@ -109,7 +109,7 @@ class TestInitDataframe:
 
     def test_invalid_schema_raises(self, component):
         """Invalid schema name should raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(SchemaError) as e:
             component.init_dataframe("NonExistentSchema")
 
 
@@ -142,7 +142,7 @@ class TestReadWriteCsv:
 
     def test_read_csv_optional_method(self, component):
         """read_csv_optional convenience method."""
-        result = component.read_csv_optional("NonExistent.csv")
+        result = component.read_csv("NonExistent.csv", optional=True)
         assert result is None
 
     def test_read_csv_optional_existing(self, component):
@@ -150,7 +150,7 @@ class TestReadWriteCsv:
         df = pd.DataFrame({"VALUE": [2025]})
         component.write_dataframe("YEAR.csv", df)
 
-        result = component.read_csv_optional("YEAR.csv")
+        result = component.read_csv("YEAR.csv", optional=True)
         assert result is not None
         assert len(result) == 1
 
@@ -158,7 +158,7 @@ class TestReadWriteCsv:
         """Writing DataFrame with wrong columns should fail validation."""
         df = pd.DataFrame({"WRONG_COL": [1, 2, 3]})
 
-        with pytest.raises(ValueError):
+        with pytest.raises(SchemaError):
             component.write_dataframe("YEAR.csv", df)
 
     def test_file_exists(self, component):
@@ -263,11 +263,11 @@ class TestPrerequisiteLoading:
     def test_load_years_empty_raises(self, empty_scenario_dir):
         """load_years raises ValueError if YEAR.csv is empty."""
         component = ConcreteComponent(empty_scenario_dir)
+        
         # Write empty YEAR.csv
-        pd.DataFrame({"VALUE": []}).to_csv(
-            os.path.join(empty_scenario_dir, "YEAR.csv"), index=False
-        )
-
+        df = component.init_dataframe("YEAR")
+        component.write_dataframe("YEAR.csv", df)
+        
         with pytest.raises(ValueError, match="No years defined"):
             component.load_years()
 
