@@ -106,26 +106,21 @@ def validate_csv(name: str, df: pd.DataFrame, schema: SchemaRegistry):
 	dtype = entry.get('dtype', 'float')
 	if schema.is_set(name):
 		# Sets: VALUE column only
-		# TODO: int/str dtypes read as object once saved to CSV
-		# may need to convvert dtypes or allow flexible types
-		pass
-		# if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
-		# 	raise SchemaError(f"Set '{name}' VALUE column must be integer type.")
-		# if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
-		# 	raise SchemaError(f"Set '{name}' VALUE column must be string type.")
+		if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
+			raise SchemaError(f"Set '{name}' VALUE column must be integer type.")
+		if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
+			raise SchemaError(f"Set '{name}' VALUE column must be string type.")
 	else:
 		# Params/results: VALUE column type
-		# TODO: int/str dtypes read as object once saved to CSV
-		# if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
-		# 	raise SchemaError(f"Param/result '{name}' VALUE column must be integer type.")
+		if dtype == 'int' and not pd.api.types.is_integer_dtype(df['VALUE']):
+			raise SchemaError(f"Param/result '{name}' VALUE column must be integer type.")
 		if dtype == 'float':
 			if pd.api.types.is_integer_dtype(df['VALUE']):
 				df['VALUE'] = df['VALUE'].astype('float')
 			if not pd.api.types.is_float_dtype(df['VALUE']):
 				raise SchemaError(f"Param/result '{name}' VALUE column must be float type.")
-		# TODO: int/str dtypes read as object once saved to CSV
-		# if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
-		# 	raise SchemaError(f"Param/result '{name}' VALUE column must be string type.")
+		if dtype == 'str' and not pd.api.types.is_string_dtype(df['VALUE']):
+			raise SchemaError(f"Param/result '{name}' VALUE column must be string type.")
 	# Check for NaNs in required columns
 	if df[expected_cols].isnull().any().any():
 		raise SchemaError(f"CSV for '{name}' contains missing values in required columns: {expected_cols}")
