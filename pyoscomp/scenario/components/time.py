@@ -389,11 +389,14 @@ class TimeComponent(ScenarioComponent):
         # Build slice_map
         slice_map = {}
         for _, row in conversionls.iterrows():
-            slice_map.setdefault(row['TIMESLICE'], {})['Season'] = row['SEASON']
+            if row['VALUE'] == 1.0:
+                slice_map.setdefault(row['TIMESLICE'], {})['Season'] = row['SEASON']
         for _, row in conversionld.iterrows():
-            slice_map.setdefault(row['TIMESLICE'], {})['DayType'] = row['DAYTYPE']
+            if row['VALUE'] == 1.0:
+                slice_map.setdefault(row['TIMESLICE'], {})['DayType'] = row['DAYTYPE']
         for _, row in conversionlh.iterrows():
-            slice_map.setdefault(row['TIMESLICE'], {})['DailyTimeBracket'] = row['DAILYTIMEBRACKET']
+            if row['VALUE'] == 1.0:
+                slice_map.setdefault(row['TIMESLICE'], {})['DailyTimeBracket'] = row['DAILYTIMEBRACKET']
 
         return {'yearsplit': yearsplit, 'slice_map': slice_map}
 
@@ -577,22 +580,25 @@ class TimeComponent(ScenarioComponent):
         """Build internal timeslice → components mapping from conversion tables."""
         self._timeslice_map = {}
 
-        # Index by timeslice
-        ls_map = dict(
-            zip(self.conversionls_df['TIMESLICE'], self.conversionls_df['SEASON'])
-        )
-        ld_map = dict(
-            zip(self.conversionld_df['TIMESLICE'], self.conversionld_df['DAYTYPE'])
-        )
-        lh_map = dict(
-            zip(self.conversionlh_df['TIMESLICE'], self.conversionlh_df['DAILYTIMEBRACKET'])
-        )
+        # Map DataFrame names to their keys
+        conversion_dfs = [
+            (self.conversionls_df, 'SEASON'),
+            (self.conversionld_df, 'DAYTYPE'),
+            (self.conversionlh_df, 'DAILYTIMEBRACKET'),
+        ]
 
+        slice_map = {}
+        for df, key in conversion_dfs:
+            for _, row in df.iterrows():
+                slice_map.setdefault(row['TIMESLICE'], {})[key] = row[key]
+
+        # Save tuple for each timeslice
         for ts in self.timeslices:
+            comp = slice_map.get(ts, {})
             self._timeslice_map[ts] = (
-                ls_map.get(ts, ''),
-                ld_map.get(ts, ''),
-                lh_map.get(ts, '')
+                comp.get('SEASON', ''),
+                comp.get('DAYTYPE', ''),
+                comp.get('DAILYTIMEBRACKET', '')
             )
 
     # =========================================================================
