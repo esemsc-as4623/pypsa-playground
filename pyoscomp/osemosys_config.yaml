@@ -59,7 +59,7 @@ Conversionls:
     dtype: float
     default: 0
 DAILYTIMEBRACKET:
-    dtype: str
+    dtype: object
     type: set
 DaysInDayType:
     indices: [SEASON,DAYTYPE,YEAR]
@@ -72,7 +72,7 @@ DaySplit:
     dtype: float
     default: 0.00137
 DAYTYPE:
-    dtype: str
+    dtype: object
     type: set
 DepreciationMethod:
     indices: [REGION]
@@ -90,7 +90,7 @@ DiscountRateStorage:
     dtype: float
     default: 0.05
 EMISSION:
-    dtype: str
+    dtype: object
     type: set
 EmissionActivityRatio:
     indices: [REGION,TECHNOLOGY,EMISSION,MODE_OF_OPERATION,YEAR]
@@ -108,7 +108,7 @@ FixedCost:
     dtype: float
     default: 0
 FUEL:
-    dtype: str
+    dtype: object
     type: set
 InputActivityRatio:
     indices: [REGION,TECHNOLOGY,FUEL,MODE_OF_OPERATION,YEAR]
@@ -121,7 +121,7 @@ MinStorageCharge:
     dtype: float
     default: 0
 MODE_OF_OPERATION:
-    dtype: int
+    dtype: object
     type: set
 ModelPeriodEmissionLimit:
     indices: [REGION,EMISSION]
@@ -149,7 +149,7 @@ OutputActivityRatio:
     dtype: float
     default: 0
 REGION:
-    dtype: str
+    dtype: object
     type: set
 REMinProductionTarget:
     indices: [REGION,YEAR]
@@ -192,7 +192,7 @@ RETagTechnology:
     dtype: float
     default: 0
 SEASON:
-    dtype: str
+    dtype: object
     type: set
 SpecifiedAnnualDemand:
     indices: [REGION,FUEL,YEAR]
@@ -205,7 +205,7 @@ SpecifiedDemandProfile:
     dtype: float
     default: 0
 STORAGE:
-    dtype: str
+    dtype: object
     type: set
 StorageLevelStart:
     indices: [REGION,STORAGE]
@@ -223,7 +223,7 @@ StorageMaxDischargeRate:
     dtype: float
     default: 0
 TECHNOLOGY:
-    dtype: str
+    dtype: object
     type: set
 TechnologyFromStorage:
     indices: [REGION,TECHNOLOGY,STORAGE,MODE_OF_OPERATION]
@@ -236,7 +236,7 @@ TechnologyToStorage:
     dtype: float
     default: 0
 TIMESLICE:
-    dtype: str
+    dtype: object
     type: set
 TotalAnnualMaxCapacity:
     indices: [REGION,TECHNOLOGY,YEAR]
