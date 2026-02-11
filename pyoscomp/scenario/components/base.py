@@ -237,6 +237,21 @@ class ScenarioComponent(ABC):
 
         df = pd.read_csv(path)
         schema_name = self._get_schema_name(filename)
+
+        # Enforce correct dtypes for empty DataFrames
+        if df.empty:
+            df = self.init_dataframe(schema_name)
+        else:
+            # Optionally, cast VALUE column to expected dtype if not empty
+            dtype = self.schema.get_dtype(schema_name)
+            if "VALUE" in df.columns:
+                if dtype == "int":
+                    df["VALUE"] = df["VALUE"].astype("int64")  # nullable int for safety
+                elif dtype == "float":
+                    df["VALUE"] = df["VALUE"].astype("float64")
+                elif dtype == "str":
+                    df["VALUE"] = df["VALUE"].astype("object")
+        
         validate_csv(schema_name, df, self.schema)
         return df
 
