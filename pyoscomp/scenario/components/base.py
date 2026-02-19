@@ -242,11 +242,11 @@ class ScenarioComponent(ABC):
         if df.empty:
             df = self.init_dataframe(schema_name)
         else:
-            # Optionally, cast VALUE column to expected dtype if not empty
+            # Cast VALUE column to expected dtype if not empty
             dtype = self.schema.get_dtype(schema_name)
             if "VALUE" in df.columns:
                 if dtype == "int":
-                    df["VALUE"] = df["VALUE"].astype("int64")  # nullable int for safety
+                    df["VALUE"] = df["VALUE"].astype("Int64")  # nullable int for safety
                 elif dtype == "float":
                     df["VALUE"] = df["VALUE"].astype("float64")
                 elif dtype == "str":

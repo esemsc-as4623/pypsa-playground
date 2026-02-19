@@ -167,6 +167,10 @@ class PerformanceComponent(ScenarioComponent):
             )
         self._supply.set_availability_factor(region, technology, availability)
 
+    def process(self):
+        if self._supply is not None:
+            self._supply.process()
+
     def __repr__(self) -> str:
         has_supply = self._supply is not None
         return f"PerformanceComponent(facade=True, supply_attached={has_supply})"
