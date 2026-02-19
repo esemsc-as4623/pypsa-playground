@@ -1,15 +1,208 @@
-# PyOSComp Critical Review & Task List
+# PyOSComp Task List: Harmonization Protocol
 
-*Generated: February 2026*
+*Updated: February 2026*
 
-This document provides a comprehensive critical review of the `pyoscomp` package, identifying design flaws, inconsistencies, and missing functionality. Tasks are prioritized based on the philosophy of **starting small, verifying repeatedly, then growing complexity**.
+This task list is focused on building the **Harmonization Protocol** required for the paper:
+
+> **Temporal Representation and Storage Valuation in Energy System Models: A Comparative Analysis of OSeMOSYS and PyPSA**
+
+**Research Question:** How does the choice between chronological snapshots (PyPSA) and representative timeslices (OSeMOSYS) propagate through model formulations to affect storage investment recommendations in offshore wind systems?
 
 ---
 
 ## Table of Contents
-1. [Critical Design Issues](#critical-design-issues)
+1. [Harmonization Protocol Requirements](#harmonization-protocol-requirements)
 2. [Prioritized Task List](#prioritized-task-list)
-3. [Detailed Analysis by Module](#detailed-analysis-by-module)
+3. [Verification Strategy](#verification-strategy)
+4. [Critical Design Issues](#critical-design-issues)
+5. [Detailed Analysis by Module](#detailed-analysis-by-module)
+
+---
+
+## Harmonization Protocol Requirements
+
+Before comparing temporal representation effects, **all implementation differences must be harmonized**:
+
+| Parameter Category | Harmonization Requirement | Verification Metric |
+|--------------------|---------------------------|---------------------|
+| **Discount Rate** | Identical rate in both models | `r_OSeMOSYS == r_PyPSA` |
+| **Technology Costs** | Same CAPEX, Fixed O&M, Variable O&M | `∑Costs_OSeMOSYS == ∑Costs_PyPSA` (undiscounted) |
+| **Technology Lifetimes** | Same operational life, depreciation | `L_OSeMOSYS == L_PyPSA` |
+| **Demand Profile** | Same annual total AND hourly shape | `∫D(t)dt` and `corr(D_osemosys, D_pypsa) > 0.99` |
+| **Wind Capacity Factor** | Same annual total, average, distribution | `CF_annual`, `mean(CF)`, `std(CF)`, `percentiles` |
+| **Topology** | PyPSA copper-plate = OSeMOSYS single-region | Single bus, single region |
+| **Cost Accounting** | NPV basis with explicit salvage value | `NPV_OSeMOSYS == NPV_PyPSA` for identical scenarios |
+
+### The Isolation Principle
+
+To measure the **pure effect of temporal representation**:
+1. Hold ALL harmonizable parameters constant
+2. Vary ONLY the time discretization:
+   - PyPSA: Full 8760-hour chronology
+   - OSeMOSYS: Representative timeslices (N timeslices)
+3. Measure: Storage capacity recommendation, utilization, value
+
+---
+
+## Prioritized Task List
+
+### Priority -1: Core Integration (BLOCKING - Must Complete First)
+*Goal: Connect Scenario.build() → ScenarioData → Translator → Runner*
+
+**Current Problem:** The `scenario/` module and `translation/` module are disconnected:
+- Scenario components build OSeMOSYS CSVs directly
+- Translators expect `ScenarioData` but have inconsistent implementations
+- `PyPSAInputTranslator` uses both `self.scenario_data` AND `self.input_data` (broken)
+- Runners work independently, not using translators
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P-1.4** | Create `PyPSARunner.from_scenario_data()` | Accept ScenarioData, use translator internally | `runners/pypsa.py` |
+| **P-1.5** | Create `OSeMOSYSRunner.from_scenario_data()` | Accept ScenarioData, export CSVs, run model | `runners/osemosys.py` |
+| **P-1.6** | Add unified `pyoscomp.run()` function | Entry point: `run(scenario_data, model='both')` | New: `pyoscomp/run.py` |
+| **P-1.7** | Create `simple-demo.ipynb` notebook | Demonstrate full pipeline: build → translate → run → compare | `notebooks/simple-demo.ipynb` |
+| **P-1.8** | Add integration test | Test that same scenario produces equivalent results | `tests/test_integration/test_pipeline.py` |
+
+**Verification:** The demo notebook must show:
+1. Build a scenario using components
+2. Convert to ScenarioData
+3. Translate to PyPSA Network
+4. Translate to OSeMOSYS CSVs
+5. Run both models
+6. Compare results
+
+### Priority 0: Harmonization Protocol Infrastructure
+*Goal: Build the validation framework to PROVE models are harmonized*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P0.1** | Create `HarmonizationValidator` class | Validates that a scenario satisfies all harmonization requirements. Reports discrepancies with tolerances. | New: `pyoscomp/validation/harmonization.py` |
+| **P0.2** | Implement discount rate validation | Compare `DiscountRate.csv` (OSeMOSYS) vs network settings (PyPSA) | `validation/harmonization.py` |
+| **P0.3** | Implement cost validation | Sum CAPEX/OPEX by technology, compare across models | `validation/harmonization.py` |
+| **P0.4** | Implement demand validation | Compare annual totals, compute correlation of profiles | `validation/harmonization.py` |
+| **P0.5** | Implement capacity factor validation | Compare wind CF: annual, mean, std, percentiles (5, 25, 50, 75, 95) | `validation/harmonization.py` |
+| **P0.6** | Create `HarmonizationReport` dataclass | Structured output showing pass/fail for each requirement with values | `validation/harmonization.py` |
+| **P0.7** | Add `scenario.validate_harmonization()` method | Entry point to run all harmonization checks | `scenario/core.py` |
+
+### Priority 1: Storage Component (Critical for Paper)
+*Goal: Full storage modeling capability in both frameworks*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P1.1** | Implement `StorageComponent` core | Storage technology registry: name, type (battery, pumped hydro, etc.) | `scenario/components/storage.py` |
+| **P1.2** | Add storage capacity parameters | `TechnologyToStorage`, `TechnologyFromStorage`, `StorageMaxChargeRate`, `StorageMaxDischargeRate` | `scenario/components/storage.py` |
+| **P1.3** | Add storage economics parameters | `CapitalCostStorage`, storage cycling costs, degradation factor | `scenario/components/storage.py`, `economics.py` |
+| **P1.4** | Add storage operational parameters | `OperationalLifeStorage`, `MinStorageCharge`, `StorageLevelStart` | `scenario/components/storage.py` |
+| **P1.5** | Implement storage efficiency handling | Round-trip efficiency consistent across models (η_charge × η_discharge) | `scenario/components/storage.py` |
+| **P1.6** | Add PyPSA storage translation | Map to `StorageUnit` with proper `efficiency_store`, `efficiency_dispatch`, `max_hours` | `translation/pypsa_translator.py` |
+| **P1.7** | Add OSeMOSYS storage export | Generate storage-related CSVs compatible with otoole | `translation/osemosys_translator.py` |
+| **P1.8** | Test storage round-trip | Build scenario → translate both → verify equivalent storage formulation | `tests/test_translation/test_storage.py` |
+
+### Priority 2: Wind/Renewable Supply (Offshore Wind Focus)
+*Goal: Accurate capacity factor handling for variable renewables*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P2.1** | Implement variable renewable technology type | `is_variable_renewable` flag on technologies, special CF handling | `scenario/components/supply.py` |
+| **P2.2** | Add hourly capacity factor profile ingestion | Load from CSV/DataFrame, associate with technology | `scenario/components/supply.py` |
+| **P2.3** | Implement CF aggregation for timeslices | When converting to OSeMOSYS, aggregate hourly CF to timeslice-average CF | `translation/osemosys_translator.py` |
+| **P2.4** | Add CF profile statistics computation | Calculate: annual total, mean, std, percentiles, autocorrelation | New: `pyoscomp/analysis/capacity_factors.py` |
+| **P2.5** | Validate CF preservation across translation | After aggregation, verify statistical properties are preserved (within tolerance) | `validation/harmonization.py` |
+| **P2.6** | Create wind profile visualizations | Time series, duration curves, histogram, seasonal patterns | `analysis/capacity_factors.py` |
+
+### Priority 3: Translation Completeness
+*Goal: Same scenario runs identically in both models (modulo temporal representation)*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P3.1** | Complete PyPSA supply translation | Add generators with efficiency, marginal_cost, capital_cost, p_nom_extendable | `translation/pypsa_translator.py` |
+| **P3.2** | Add PyPSA cost handling | Translate CAPEX to annualized costs OR use multi-period investment | `translation/pypsa_translator.py` |
+| **P3.3** | Implement salvage value in PyPSA | For consistency, add salvage value calculation post-optimization | New: `analysis/cost_accounting.py` |
+| **P3.4** | Complete OSeMOSYS translator | Generate all required CSVs from ScenarioData, validate against otoole | `translation/osemosys_translator.py` |
+| **P3.5** | Add time structure translation tests | Verify YearSplit sums to 1.0, snapshot weightings match | `tests/test_translation/test_time.py` |
+| **P3.6** | Document temporal representation differences | Explain how the SAME underlying data becomes snapshots vs timeslices | `docs/temporal_representation.md` |
+
+### Priority 4: Economics & Cost Accounting
+*Goal: Consistent NPV calculation across models*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P4.1** | Verify EconomicsComponent completeness | Ensure discount rate, capital/fixed/variable costs are fully implemented | `scenario/components/economics.py` |
+| **P4.2** | Add explicit salvage value calculation | OSeMOSYS calculates automatically; add equivalent for PyPSA post-processing | `analysis/cost_accounting.py` |
+| **P4.3** | Implement NPV comparison function | Given results from both models, compute and compare NPV | `analysis/cost_accounting.py` |
+| **P4.4** | Add cost breakdown visualization | Stacked bar: CAPEX, Fixed O&M, Variable O&M, Salvage, by technology | `analysis/cost_accounting.py` |
+| **P4.5** | Validate cost consistency | Test: identical scenario → identical NPV (within tolerance) | `tests/test_integration/test_cost_consistency.py` |
+
+### Priority 5: Runner Infrastructure
+*Goal: Execute both models from unified interface*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P5.1** | Fix OSeMOSYS runner paths | Make model file path configurable, add proper error handling | `runners/osemosys.py` |
+| **P5.2** | Connect PyPSA runner to translator | Use `PyPSAInputTranslator` output instead of raw CSVs | `runners/pypsa.py` |
+| **P5.3** | Standardize result extraction | Common interface: `RunResult` with objective, capacities, dispatch, costs | New: `runners/results.py` |
+| **P5.4** | Add solver configuration | Timeout, gap tolerance, solver selection for both models | `runners/*.py` |
+| **P5.5** | Create unified `pyoscomp.run()` | Single entry point: `run(scenario, model='both')` returns comparable results | `__main__.py` or `runners/__init__.py` |
+
+### Priority 6: Verification & Visualization
+*Goal: PROVE harmonization works and SHOW the temporal representation effect*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P6.1** | Create harmonization summary visualization | Dashboard showing all harmonization checks: pass/fail with values | New: `visualization/harmonization.py` |
+| **P6.2** | Implement demand profile comparison plot | Side-by-side or overlay: PyPSA hourly vs OSeMOSYS timeslice demand | `visualization/harmonization.py` |
+| **P6.3** | Implement CF comparison plot | Duration curves, distributions for both representations | `visualization/harmonization.py` |
+| **P6.4** | Create storage dispatch comparison | Time series of storage charge/discharge across both models | `visualization/storage.py` |
+| **P6.5** | Implement storage value decomposition | Revenue from arbitrage, capacity credit, ancillary services | `analysis/storage_value.py` |
+| **P6.6** | Create sensitivity analysis tools | Vary timeslice count, measure storage recommendation changes | `analysis/sensitivity.py` |
+
+### Priority 7: Paper Artifacts
+*Goal: Generate figures and tables for the paper*
+
+| ID | Task | Description | Files Affected |
+|----|------|-------------|----------------|
+| **P7.1** | Create `paper_scenarios.py` | Offshore wind + storage scenario configurations for the paper | New: `scenarios/paper_scenarios.py` |
+| **P7.2** | Build comparison notebook | `notebooks/temporal_comparison.ipynb`: full workflow demonstrating harmonization | `notebooks/temporal_comparison.ipynb` |
+| **P7.3** | Generate Figure 1: Temporal representation schematic | Visual explanation of snapshots vs timeslices | Notebook or `visualization/` |
+| **P7.4** | Generate Figure 2: Harmonization validation | Show that non-temporal parameters are identical | Notebook |
+| **P7.5** | Generate Figure 3: Storage results comparison | Side-by-side: optimal storage capacity, utilization, value | Notebook |
+| **P7.6** | Generate Figure 4: Sensitivity to timeslice count | How storage recommendation changes with N timeslices | Notebook |
+| **P7.7** | Generate Table 1: Input parameter summary | All harmonized parameters with values | Notebook |
+| **P7.8** | Generate Table 2: Model comparison results | Key outputs: objective, storage capacity, wind curtailment | Notebook |
+| **P7.9** | Export publication-quality figures | High-DPI PNG/PDF with consistent styling | `visualization/style.py` |
+
+---
+
+## Verification Strategy
+
+### Level 1: Unit Verification (Per Component)
+- Each harmonization check has a standalone test
+- Example: `test_discount_rate_harmonized()` compares rates from both models
+
+### Level 2: Integration Verification (Full Scenario)
+- Build a "trivial" scenario (1 tech, 1 region, 1 year, minimal time)
+- Verify IDENTICAL results from both models (objective, dispatch)
+- This proves the models are equivalent WHEN temporal structure is identical
+
+### Level 3: Controlled Variation (The Experiment)
+- Build offshore wind + storage scenario
+- Run with IDENTICAL scenarios except:
+  - PyPSA: 8760 hours
+  - OSeMOSYS: 12, 24, 48, 96, 288 timeslices
+- Measure:
+  - Optimal storage capacity
+  - Storage utilization (cycles/year, avg state of charge)
+  - Wind curtailment
+  - System cost
+
+### Verification Outputs
+
+| Output | Purpose | Format |
+|--------|---------|--------|
+| `harmonization_report.json` | Machine-readable validation results | JSON |
+| `harmonization_report.md` | Human-readable summary | Markdown |
+| `comparison_results.csv` | Model outputs for statistical analysis | CSV |
+| `figures/*.pdf` | Publication-ready visualizations | PDF |
 
 ---
 
@@ -25,328 +218,190 @@ Scenario.build() → Translator.translate() → Runner.run()
 
 **Fix:** Define a clear `ScenarioData` interface that both scenario building and translation consume.
 
-#### 1.2 Missing Economics and Performance Components
-- [economics.py](pyoscomp/scenario/components/economics.py) - **EMPTY**
-- [performance.py](pyoscomp/scenario/components/performance.py) - **EMPTY**
-
-These are core to `simple.ipynb` (capital_costs, variable_costs, discount_rate, efficiency) but have no implementation.
+#### 1.2 Storage Component Missing
+[storage.py](pyoscomp/scenario/components/storage.py) is **EMPTY** - critical blocker for the paper.
 
 #### 1.3 Component Dependencies Not Enforced
 Components claim prerequisites (e.g., `demand.py` requires Time and Topology) but:
 - No formal dependency injection or ordering mechanism
 - `Scenario.build()` doesn't validate component readiness
-- Circular import pattern: `DemandComponent` imports `TimeComponent` at runtime
 
-### 2. **Data Validation & Consistency**
+### 2. **Model Equivalence Issues (Critical for Paper)**
 
-#### 2.1 No Schema Validation
-CSVs are written and read with ad-hoc column expectations. There's no formal schema definition that ensures:
-- Required columns are present
-- Data types are correct
-- Foreign key relationships are valid (e.g., TECHNOLOGY in CapacityFactor must exist in TECHNOLOGY.csv)
+#### 2.1 OSeMOSYS-PyPSA Semantic Gaps
+- OSeMOSYS `CapacityFactor` = max annual capacity factor (scalar per timeslice)
+- PyPSA `p_max_pu` = time series (value per snapshot)
+- **These must be reconciled for fair comparison**
 
-#### 2.2 Inconsistent Error Handling
-- Some methods use `raise ValueError`
-- Some use `print(f"WARNING: ...")`
-- Some silently return or continue
+#### 2.2 Cost Accounting Differences
+- OSeMOSYS: Explicit salvage value in objective function
+- PyPSA: Typically uses annualized costs, no explicit salvage
+- **Must add salvage calculation to PyPSA post-processing**
 
-**Fix:** Establish a logging/error handling strategy with clear severity levels.
+#### 2.3 Time Handling
+- OSeMOSYS: Year-agnostic timeslice fractions (`YearSplit`)
+- PyPSA: Explicit datetime snapshots with weights
+- **Translation must preserve energy balance and chronology effects**
 
-#### 2.3 Floating Point Tolerance Inconsistency
-- `TimeComponent` uses `TOL = 1e-6` and `math.isclose()`
-- No tolerance handling elsewhere
-- Decimal arithmetic mixed with float arithmetic
+### 3. **Validation Gaps**
 
-### 3. **Testing & Reproducibility**
+#### 3.1 No Harmonization Validation
+Currently no way to verify that two model representations are consistent.
 
-#### 3.1 Test Coverage Gaps
-- `translation/time/` has comprehensive tests
-- `scenario/components/` has **NO TESTS**
-- `runners/` has **NO TESTS**
-- No integration tests that run the full pipeline
-
-#### 3.2 No Fixtures for Scenario Components
-The test fixtures (`conftest.py`) only cover OSeMOSYS file structures, not the component API.
-
-### 4. **API Design Issues**
-
-#### 4.1 Mutable State Without Transaction Semantics
-Components modify internal DataFrames incrementally via `add_to_dataframe()`, but:
-- No rollback mechanism if validation fails mid-operation
-- No atomic "build" that validates everything before writing
-- `save()` can be called with partially-valid state
-
-#### 4.2 Inconsistent Method Signatures
-- `add_technology()` takes positional args, `set_conversion_technology()` uses keywords
-- Some methods accept `year=None` meaning "all years", others require explicit list
-- `trajectory: dict` vs `factor_dict: dict` naming inconsistency
-
-#### 4.3 No Builder Pattern for Complex Objects
-Setting up a technology requires multiple calls:
-```python
-supply.add_technology(...)
-supply.set_conversion_technology(...)
-supply.set_capacity_bounds(...)  # If it exists
-supply.set_capacity_factor_profile(...)  # If it exists
-```
-Should be:
-```python
-supply.add_technology(...).with_conversion(...).with_bounds(...).build()
-```
-
-### 5. **Documentation Gaps**
-
-#### 5.1 No End-to-End Example
-- `simple.ipynb` shows raw OSeMOSYS/PyPSA usage, not pyoscomp usage
-- No notebook demonstrating `ScenarioManager → Scenario → Translator → Runner` workflow
-
-#### 5.2 Docstrings Incomplete
-- Many methods have docstrings but lack `Raises:` section
-- No type hints on many method signatures
-- Example code in docstrings is untested and may be outdated
-
-### 6. **Model Equivalence Issues**
-
-#### 6.1 OSeMOSYS-PyPSA Semantic Gaps Not Documented
-- OSeMOSYS `CapacityFactor` ≠ PyPSA `p_max_pu` (one is annual max, other is per-snapshot)
-- OSeMOSYS `YearSplit` is year-agnostic fraction; PyPSA snapshots have explicit datetime
-- No clear mapping documentation or validation of equivalent behavior
-
-#### 6.2 Time Translation is Incomplete
-- `translation/time/` has sophisticated structures but unclear integration with scenario building
-- `Timeslice` class not connected to `TimeComponent.add_time_structure()`
-
----
-
-## Prioritized Task List
-
-### Priority 1: Visualization Module
-*Goal: Create visualizations to aid in scenario building*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P1.1** | | | |
-
-### Priority 2: Validation & Robustness
-*Goal: Prevent silent failures and catch errors early*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P2.3** | Standardize error handling | Replace all `print("WARNING")` with proper logging. Define when to warn vs raise. | All component files |
-
-### Priority 3: Translation Pipeline
-*Goal: Reliable conversion between OSeMOSYS CSVs and PyPSA Network*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P3.3** | Implement OSeMOSYSInputTranslator properly | Currently a stub. Should convert ScenarioData to otoole-compatible format | `translation/osemosys_translator.py` |
-| **P3.4** | Document time translation semantics | Explain how timeslices map to snapshots, edge cases, leap years | `docs/time_translation.md` |
-| **P3.5** | Add integration test: same scenario → both models → compare results | Extend simple.ipynb pattern programmatically | `tests/test_integration/test_model_comparison.py` |
-
-### Priority 4: Runner Infrastructure
-*Goal: Executable end-to-end workflow*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P4.1** | Test OSeMOSYSRunner with simple scenario | Ensure otoole conversion + glpsol execution works | `tests/test_runners/test_osemosys.py` |
-| **P4.2** | Fix PyPSARunner to use translator output | Current implementation reads CSVs directly; should use PyPSAInputTranslator | `runners/pypsa.py` |
-| **P4.3** | Add result extraction to runners | Standardized way to extract and return optimization results | `runners/*.py` |
-| **P4.4** | Create unified run interface | `pyoscomp.run(scenario, model='osemosys')` entry point | `pyoscomp/__main__.py` or new CLI |
-
-### Priority 5: API Ergonomics
-*Goal: Intuitive, hard-to-misuse API*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P5.1** | Add type hints to all public methods | Enable IDE support and static analysis | All files |
-| **P5.2** | Implement builder pattern for technologies | Fluent API: `supply.technology("GAS_CCGT").with_efficiency(0.55).build()` | `scenario/components/supply.py` |
-| **P5.3** | Add method chaining where appropriate | Return `self` from mutator methods to enable chaining | All component files |
-| **P5.4** | Create scenario templates/presets | E.g., `Scenario.from_template("simple_power_system")` | New: `scenario/templates/` |
-| **P5.5** | Unify trajectory/profile handling | Single consistent API for time-varying parameters across all components | All component files |
-
-### Priority 6: Comprehensive Documentation
-*Goal: Users can learn from examples and reference docs*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P6.1** | Create end-to-end tutorial notebook | Build scenario → translate → run → compare, using pyoscomp API | `notebooks/pyoscomp_tutorial.ipynb` |
-| **P6.2** | Document all OSeMOSYS ↔ PyPSA parameter mappings | Table showing equivalents and semantic differences | `docs/parameter_mapping.md` |
-| **P6.3** | Add doctest examples | Executable examples in docstrings | All component files |
-| **P6.4** | Create API reference documentation | Auto-generated from docstrings | `docs/api/` |
-| **P6.5** | Document known limitations and gotchas | What can't pyoscomp do? What are the assumptions? | `docs/limitations.md` |
-
-### Priority 7: Complexity Expansion (After Core is Stable)
-*Goal: Support more sophisticated scenarios*
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P7.1** | Implement StorageComponent | Support OSeMOSYS storage parameters | `scenario/components/storage.py` |
-| **P7.2** | Add storage translation to PyPSA | Map to PyPSA StorageUnit/Store components | `translation/pypsa_translator.py` |
-| **P7.3** | Implement EmissionsComponent | Support EmissionsPenalty, AnnualEmissionLimit, etc. | New: `scenario/components/emissions.py` |
-| **P7.4** | Add targets/constraints component | RE targets, capacity limits, etc. | New: `scenario/components/targets.py` |
-| **P7.5** | Support multi-region with trade | TradeRoute, connections between regions | Extend `topology.py` |
+#### 3.2 No Cross-Model Result Comparison
+No infrastructure to compare outputs from OSeMOSYS and PyPSA runs.
 
 ---
 
 ## Detailed Analysis by Module
 
-### `scenario/core.py`
-**Issues:**
-- Hardcoded component list (only topology, time, demand, supply)
-- `build()` method doesn't validate component ordering or dependencies
-- No way to skip components or add custom ones
+### `scenario/components/storage.py` (CRITICAL BLOCKER)
+**Status:** Empty file
+**Required for paper:** YES - storage valuation is central to research question
 
-**Recommendation:** Use a registry pattern for components with declared dependencies.
-
-### `scenario/components/base.py`
-**Issues:**
-- `copy()` is static method but operates on directories, not component instances
-- `add_to_dataframe()` silently drops duplicates based on `keep='last'` - may hide user errors
-- No validation that key_columns exist before attempting dedup
-
-**Recommendation:** Add option to raise on duplicate keys; make copy an instance method.
-
-### `scenario/components/time.py`
-**Issues:**
-- 525 lines - too large, should be split into structure generation and visualization
-- `_sanitize()` replaces `_` with `__` to avoid ambiguity, but this is fragile
-- `load_time_axis()` is a static method that takes `scenario` arg - confusing API
-- Visualization logic shouldn't be in data class
-
-**Recommendation:** Extract visualization to separate module. Use proper namespacing for timeslice names.
+**Implementation Priority:**
+1. Define storage technology structure (name, type, capacity)
+2. Add efficiency parameters (charge/discharge efficiencies)
+3. Add economic parameters (CAPEX, cycling costs)
+4. Add operational constraints (min/max charge rates, losses)
 
 ### `scenario/components/supply.py`
 **Issues:**
-- 1133 lines - far too large
-- Mixes technology metadata, capacity bounds, efficiency, and activity ratios
-- `check_prerequisites()` hardcodes column names that may not exist
-- No clear boundary with would-be PerformanceComponent
+- No variable renewable technology flag
+- No hourly capacity factor profile handling
+- Aggregation to timeslices not implemented
 
-**Recommendation:** Split into SupplyComponent (technology registry), CapacityComponent (bounds), and clarify boundary with PerformanceComponent.
-
-### `scenario/components/demand.py`
-**Issues:**
-- Trajectory interpolation logic is complex and duplicated
-- `add_annual_demand()` silently converts invalid interpolation to 'step'
-- `set_subannual_profile()` year=None applies only first year's profile to all - unclear
-
-**Recommendation:** Extract trajectory handling to shared utility. Clarify year=None behavior.
-
-### `scenario/manager.py`
-**Issues:**
-- UUID generation happens at init even if loading existing scenario
-- `_create_empty_csv_files()` reads OSeMOSYS config but writes simplified headers
-- Master list CSV-based tracking is fragile; no locking, no cleanup of deleted scenarios
-
-**Recommendation:** Consider SQLite or YAML for scenario registry. Add scenario deletion support.
-
-### `translation/time/`
-**Issues:**
-- Well-documented and tested, but isolated from rest of package
-- `Timeslice` dataclass not used by `TimeComponent`
-- `create_map()` returns complex nested structure that's hard to use
-
-**Recommendation:** Bridge gap between `translation/time/structures.py` and `scenario/components/time.py`. Consider making `Timeslice` the canonical representation.
+**For Paper:**
+- Must handle offshore wind CF profiles
+- Must support aggregation for OSeMOSYS timeslices
 
 ### `translation/pypsa_translator.py`
 **Issues:**
-- `_create_snapshots()` calculates 8760 hours/year hardcoded
-- `_add_demand()` has complex pivot/stack logic that's hard to follow
 - `_add_supply()` is empty placeholder
-- No handling of efficiency, capacity bounds, or costs
+- No storage translation
+- No cost handling (CAPEX not translated)
 
-**Recommendation:** Implement supply translation. Use constants for hours_in_year. Add comprehensive tests.
+**For Paper:**
+- Must translate storage to `StorageUnit`
+- Must handle variable renewable `p_max_pu` from CF profiles
 
 ### `translation/osemosys_translator.py`
-**Issues:**
-- Completely stubbed - just returns input data unchanged
-- No actual translation logic
+**Status:** Stub only
+**Required:** Full implementation for otoole compatibility
 
-**Recommendation:** Implement proper CSV generation compatible with otoole.
-
-### `runners/osemosys.py`
-**Issues:**
-- Hardcoded path `os.path.join("start", "OSeMOSYS.txt")` - fragile
-- No error capture from subprocess calls
-- Pyomo path marked NotImplementedError
-
-**Recommendation:** Make model file path configurable. Add proper error handling and output capture.
-
-### `runners/pypsa.py`
-**Issues:**
-- `build_network()` reads CSVs directly instead of using translator
-- `import_from_dataframe()` may not exist on all PyPSA components
-- No handling for components not matching PyPSA names
-
-**Recommendation:** Use PyPSAInputTranslator. Handle unknown components gracefully.
+### `validation/` (NEW MODULE NEEDED)
+**Purpose:** Harmonization validation framework
+**Must implement:**
+- Cross-model parameter comparison
+- Statistical validation (mean, std, percentiles)
+- Report generation
 
 ---
 
-## Implementation Order Summary
+## Implementation Order for Paper
 
 ```
-Phase 1 (Weeks 1-2): P1.1 → P1.2 → P1.3 → P1.4 → P1.5
-    ↓ Working scenario builder for simple case
-Phase 2 (Weeks 3-4): P2.1 → P2.2 → P2.3 → P2.4 → P2.5
-    ↓ Robust validation
-Phase 3 (Weeks 5-6): P3.1 → P3.2 → P3.3 → P3.4 → P3.5
-    ↓ Working translation
-Phase 4 (Weeks 7-8): P4.1 → P4.2 → P4.3 → P4.4
-    ↓ End-to-end execution
-Phase 5 (Weeks 9-10): P5.1 → P5.2 → ... → P6.5
-    ↓ Polish & documentation
-Phase 6 (Ongoing): P7.1 → P7.2 → ...
-    ↓ Expand capabilities
+Week 1-2: Harmonization Infrastructure (P0)
+    ├── P0.1-P0.6: Build HarmonizationValidator
+    └── Output: Can PROVE two scenarios are harmonized
+
+Week 3-4: Storage Component (P1)
+    ├── P1.1-P1.5: Build StorageComponent
+    ├── P1.6-P1.7: Storage translation
+    └── Output: Can model battery storage in both frameworks
+
+Week 5-6: Wind/Renewables (P2) + Translation (P3)
+    ├── P2.1-P2.6: Variable renewable handling
+    ├── P3.1-P3.4: Complete translators
+    └── Output: Offshore wind scenario runs in both models
+
+Week 7-8: Economics & Runners (P4, P5)
+    ├── P4.1-P4.5: Cost consistency
+    ├── P5.1-P5.5: Unified run interface
+    └── Output: Single command runs both models, extracts results
+
+Week 9-10: Verification & Paper (P6, P7)
+    ├── P6.1-P6.6: Visualizations
+    ├── P7.1-P7.9: Paper artifacts
+    └── Output: All figures and tables for paper
 ```
 
 ---
 
-## Appendix: Specific Code Smells
+## Appendix: Key Technical Decisions
 
-### Duplicated Trajectory/Interpolation Logic
-- `demand.py:add_annual_demand()` lines 137-216
-- Similar pattern likely needed in `supply.py` for time-varying efficiency
-- **Fix:** Create `pyoscomp/utils/trajectories.py`
+### Temporal Representation Translation
 
-### Inconsistent Year Handling
+**PyPSA → OSeMOSYS Aggregation:**
 ```python
-# demand.py - treats year=None as "all years"
-if isinstance(year, int):
-    years = [year]
-elif isinstance(year, list):
-    years = year
-else:
-    years = [self.years[0]]  # ← Only applies to first year!
+# Hourly capacity factor to timeslice capacity factor
+cf_timeslice[ts] = weighted_mean(cf_hourly[hours_in_ts], weights=duration_hours)
 
-# supply.py - treats year=None as "all years"
-if year is None:
-    years = self.years  # ← Applies to all years
+# Verification: Energy must be preserved
+E_hourly = sum(cf_hourly * P_nom * dt)
+E_timeslice = sum(cf_timeslice * P_nom * YearSplit * 8760)
+assert abs(E_hourly - E_timeslice) < TOL
 ```
 
-### Magic Numbers
-- `8760` hours/year appears in multiple places
-- `31.536` capacity_to_activity default (GW to PJ) undocumented
-- `365` days/year (no leap year handling)
-
-**Fix:** Define constants in central `pyoscomp/constants.py`
-
-### Circular Import Pattern
+**OSeMOSYS → PyPSA Disaggregation:**
 ```python
-# In demand.py and supply.py
-def load_time_axis(self):
-    from pyoscomp.scenario.components.time import TimeComponent
-    time_data = TimeComponent.load_time_axis(self)
+# For each snapshot, find containing timeslice, use that CF
+cf_hourly[t] = cf_timeslice[find_timeslice(t)]
+# Note: This loses hourly variability information
 ```
-This import inside method is a code smell indicating coupling issues.
+
+### Storage Model Equivalence
+
+| OSeMOSYS | PyPSA | Notes |
+|----------|-------|-------|
+| `TechnologyToStorage` | `StorageUnit.store` | Links generator to storage |
+| `TechnologyFromStorage` | `StorageUnit.dispatch` | Links storage to demand |
+| `StorageMaxChargeRate` | `StorageUnit.p_nom * efficiency_store` | MW |
+| `StorageMaxDischargeRate` | `StorageUnit.p_nom` | MW |
+| `MinStorageCharge` | `StorageUnit.state_of_charge_initial` | Fraction |
+| `OperationalLifeStorage` | (Post-processing) | Used in salvage calc |
+| Round-trip efficiency | `efficiency_store * efficiency_dispatch` | Must be consistent |
+
+### NPV Calculation Equivalence
+
+**OSeMOSYS (built-in):**
+```
+NPV = Σ_y [ (CAPEX + FixedOM + VariableOM) / (1+r)^y ] - SalvageValue / (1+r)^Y
+```
+
+**PyPSA (requires post-processing):**
+```python
+# PyPSA uses annualized costs, must convert back to NPV
+annuity = capital_cost * CRF  # CRF = r(1+r)^n / ((1+r)^n - 1)
+# OR: Use multi-period investment with explicit salvage
+```
+
+### Magic Numbers → Constants
+
+| Magic Number | Constant | Location |
+|-------------|----------|----------|
+| `8760` | `HOURS_PER_YEAR` | `pyoscomp/constants.py` |
+| `8784` | `HOURS_PER_LEAP_YEAR` | `pyoscomp/constants.py` |
+| `31.536` | `GW_TO_PJ_FACTOR` | `pyoscomp/constants.py` |
+| `1e-8` | `TOL` | `pyoscomp/constants.py` |
 
 ---
 
-## Acceptance Criteria for "Done"
+## Acceptance Criteria
 
-A task is complete when:
-1. Code passes all existing tests
-2. New tests added for new functionality (>80% coverage)
-3. Type hints added to public API
-4. Docstrings updated with examples
-5. No new `print()` statements (use logging)
-6. Code reviewed and merged to main branch
+### For Harmonization Validation
+- [ ] `HarmonizationValidator` passes for identical scenarios
+- [ ] Clear error messages for harmonization failures
+- [ ] Report shows exact values and tolerances
+
+### For Storage Component
+- [ ] Can define battery with: capacity, efficiency, costs
+- [ ] Translates correctly to both OSeMOSYS and PyPSA
+- [ ] Storage dispatch matches when time structure is identical
+
+### For Paper Readiness
+- [ ] Offshore wind + storage scenario defined
+- [ ] Both models run from same scenario definition
+- [ ] Results are comparable (same units, same accounting)
+- [ ] Figures generated in publication quality
+- [ ] Sensitivity analysis complete (N timeslices vs storage capacity)
