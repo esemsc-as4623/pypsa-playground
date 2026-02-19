@@ -22,11 +22,9 @@ import math
 import os
 import pytest
 import pandas as pd
-import numpy as np
 
-from pyoscomp.scenario.components.topology import TopologyComponent
-from pyoscomp.scenario.components.time import TimeComponent
 from pyoscomp.scenario.components.supply import SupplyComponent
+from pyoscomp.scenario.components.performance import PerformanceComponent
 
 
 # =============================================================================
@@ -36,13 +34,15 @@ from pyoscomp.scenario.components.supply import SupplyComponent
 @pytest.fixture
 def supply_component(complete_scenario_dir):
     """Create SupplyComponent with all prerequisites."""
-    return SupplyComponent(complete_scenario_dir)
+    perf = PerformanceComponent(complete_scenario_dir)
+    return SupplyComponent(complete_scenario_dir, performance=perf)
 
 
 @pytest.fixture
 def supply_with_tech(complete_scenario_dir):
     """Supply component with a registered technology."""
-    supply = SupplyComponent(complete_scenario_dir)
+    perf = PerformanceComponent(complete_scenario_dir)
+    supply = SupplyComponent(complete_scenario_dir, performance=perf)
     supply.add_technology('REGION1', 'GAS_CCGT', operational_life=30)
     return supply
 
@@ -69,9 +69,7 @@ class TestSupplyInit:
         """owned_files contains supply-related files."""
         expected = [
             'TECHNOLOGY.csv', 'FUEL.csv', 'MODE_OF_OPERATION.csv',
-            'CapacityToActivityUnit.csv', 'OperationalLife.csv',
-            'InputActivityRatio.csv', 'OutputActivityRatio.csv',
-            'CapacityFactor.csv', 'AvailabilityFactor.csv', 'ResidualCapacity.csv'
+            'ResidualCapacity.csv'
         ]
         assert set(SupplyComponent.owned_files) == set(expected)
 
@@ -135,7 +133,7 @@ class TestAddTechnology:
             capacity_to_activity_unit=8760
         )
 
-        df = supply_component.capacity_to_activity_unit
+        df = supply_component._perf.capacity_to_activity_unit
         row = df[(df['TECHNOLOGY'] == 'WIND')]
         assert row['VALUE'].iloc[0] == 8760
 
@@ -162,7 +160,7 @@ class TestAddTechnology:
 
     def test_operational_life_stored(self, supply_with_tech):
         """OperationalLife stored correctly."""
-        df = supply_with_tech.operational_life
+        df = supply_with_tech._perf.operational_life
         row = df[df['TECHNOLOGY'] == 'GAS_CCGT']
         assert row['VALUE'].iloc[0] == 30
 
@@ -184,14 +182,14 @@ class TestSetConversionTechnology:
         )
 
         # Check input activity ratio
-        inp = supply_with_tech.input_activity_ratio
+        inp = supply_with_tech._perf.input_activity_ratio
         assert len(inp) > 0
         row = inp[inp['TECHNOLOGY'] == 'GAS_CCGT'].iloc[0]
         # Input ratio = 1/efficiency = 1/0.55 ≈ 1.818
         assert math.isclose(row['VALUE'], 1.0 / 0.55, rel_tol=0.01)
 
         # Check output activity ratio
-        out = supply_with_tech.output_activity_ratio
+        out = supply_with_tech._perf.output_activity_ratio
         row = out[out['TECHNOLOGY'] == 'GAS_CCGT'].iloc[0]
         assert row['VALUE'] == 1.0
 
@@ -203,7 +201,7 @@ class TestSetConversionTechnology:
             efficiency={2025: 0.50, 2030: 0.55}
         )
 
-        inp = supply_with_tech.input_activity_ratio
+        inp = supply_with_tech._perf.input_activity_ratio
         # Check both values present
         val_2025 = inp[(inp['TECHNOLOGY'] == 'GAS_CCGT') &
                        (inp['YEAR'] == 2025)]['VALUE'].iloc[0]
@@ -265,10 +263,10 @@ class TestSetResourceTechnology:
         )
 
         # Should have output only (no input)
-        assert supply_component.input_activity_ratio.empty or \
-               'SOLAR_PV' not in supply_component.input_activity_ratio['TECHNOLOGY'].values
+        assert supply_component._perf.input_activity_ratio.empty or \
+               'SOLAR_PV' not in supply_component._perf.input_activity_ratio['TECHNOLOGY'].values
 
-        out = supply_component.output_activity_ratio
+        out = supply_component._perf.output_activity_ratio
         row = out[out['TECHNOLOGY'] == 'SOLAR_PV'].iloc[0]
         assert row['VALUE'] == 1.0
         assert row['FUEL'] == 'ELECTRICITY'
@@ -433,7 +431,7 @@ class TestSetAvailabilityFactor:
             'REGION1', 'GAS_CCGT', availability=0.9
         )
 
-        df = supply_with_tech.availability_factor
+        df = supply_with_tech._perf.availability_factor
         assert (df['VALUE'] == 0.9).all()
 
     def test_availability_factor_dict(self, supply_with_tech):
@@ -443,7 +441,7 @@ class TestSetAvailabilityFactor:
             availability={2025: 0.95, 2030: 0.90}
         )
 
-        df = supply_with_tech.availability_factor
+        df = supply_with_tech._perf.availability_factor
         val_2025 = df[df['YEAR'] == 2025]['VALUE'].iloc[0]
         val_2030 = df[df['YEAR'] == 2030]['VALUE'].iloc[0]
 
@@ -474,7 +472,7 @@ class TestProcess:
         )
         supply_with_tech.process()
 
-        assert not supply_with_tech.capacity_factor.empty
+        assert not supply_with_tech._perf.capacity_factor.empty
 
     def test_process_default_capacity_factor(self, supply_with_tech):
         """Default capacity factor is 1.0."""
@@ -483,7 +481,7 @@ class TestProcess:
         )
         supply_with_tech.process()
 
-        df = supply_with_tech.capacity_factor
+        df = supply_with_tech._perf.capacity_factor
         # All values should be 1.0 (default)
         assert (df['VALUE'] == 1.0).all()
 
@@ -494,7 +492,7 @@ class TestProcess:
         )
         supply_with_tech.process()
 
-        df = supply_with_tech.availability_factor
+        df = supply_with_tech._perf.availability_factor
         assert (df['VALUE'] == 1.0).all()
 
 
@@ -581,9 +579,12 @@ class TestSupplyLoadSave:
         )
         supply_with_tech.process()
         supply_with_tech.save()
+        supply_with_tech._perf.save()
 
         # Load in new instance
-        loaded = SupplyComponent(supply_with_tech.scenario_dir)
+        perf_loaded = PerformanceComponent(supply_with_tech.scenario_dir)
+        perf_loaded.load()
+        loaded = SupplyComponent(supply_with_tech.scenario_dir, performance=perf_loaded)
         loaded.load()
 
         # Verify technologies
@@ -602,7 +603,8 @@ class TestSupplyIntegration:
 
     def test_full_workflow(self, complete_scenario_dir):
         """Complete workflow: add technologies, set parameters, process, save."""
-        supply = SupplyComponent(complete_scenario_dir)
+        perf = PerformanceComponent(complete_scenario_dir)
+        supply = SupplyComponent(complete_scenario_dir, performance=perf)
 
         # Add technologies
         supply.add_technology('REGION1', 'GAS_CCGT', operational_life=30)
@@ -641,6 +643,7 @@ class TestSupplyIntegration:
 
         # Save
         supply.save()
+        perf.save()
 
         # Verify files created
         assert os.path.exists(
@@ -652,7 +655,8 @@ class TestSupplyIntegration:
 
     def test_multiple_technologies(self, complete_scenario_dir):
         """Multiple technologies with different characteristics."""
-        supply = SupplyComponent(complete_scenario_dir)
+        perf = PerformanceComponent(complete_scenario_dir)
+        supply = SupplyComponent(complete_scenario_dir, performance=perf)
 
         # Thermal
         supply.add_technology('REGION1', 'COAL', operational_life=40)
