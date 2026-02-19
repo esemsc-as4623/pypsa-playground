@@ -32,8 +32,8 @@ __all__ = [
     'TimeParameters',
     'DemandParameters',
     'SupplyParameters',
-    'EconomicsParameters',
     'PerformanceParameters',
+    'EconomicsParameters',
     # Container
     'ScenarioData',
     # Utilities

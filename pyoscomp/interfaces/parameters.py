@@ -221,6 +221,102 @@ class SupplyParameters:
 
 
 @dataclass(frozen=True)
+class PerformanceParameters:
+    """
+    Performance parameters (owned by SupplyComponent, facade in PerformanceComponent).
+    
+    Attributes
+    ----------
+    operational_life : pd.DataFrame
+        OperationalLife[r,t] - Asset lifetime in years.
+        Columns: REGION, TECHNOLOGY, VALUE
+    capacity_to_activity_unit : pd.DataFrame
+        CapacityToActivityUnit[r,t] - Conversion factor (default 8760).
+        Columns: REGION, TECHNOLOGY, VALUE
+    input_activity_ratio : pd.DataFrame
+        InputActivityRatio[r,t,f,m,y] - Input fuel per unit output.
+        Columns: REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR, VALUE
+    output_activity_ratio : pd.DataFrame
+        OutputActivityRatio[r,t,f,m,y] - Output per unit activity.
+        Columns: REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR, VALUE
+    capacity_factor : pd.DataFrame
+        CapacityFactor[r,t,l,y] - Max capacity utilization per timeslice.
+        Columns: REGION, TECHNOLOGY, TIMESLICE, YEAR, VALUE
+    availability_factor : pd.DataFrame
+        AvailabilityFactor[r,t,y] - Annual availability (0-1).
+        Columns: REGION, TECHNOLOGY, YEAR, VALUE
+    
+    Notes
+    -----
+    - CapacityFactor and AvailabilityFactor should be in range [0, 1]
+    - OperationalLife should be positive integer
+    """
+    operational_life: pd.DataFrame = field(default_factory=_empty_df)
+    capacity_to_activity_unit: pd.DataFrame = field(default_factory=_empty_df)
+    input_activity_ratio: pd.DataFrame = field(default_factory=_empty_df)
+    output_activity_ratio: pd.DataFrame = field(default_factory=_empty_df)
+    capacity_factor: pd.DataFrame = field(default_factory=_empty_df)
+    availability_factor: pd.DataFrame = field(default_factory=_empty_df)
+    
+    CSV_MAPPING = {
+        'operational_life': 'OperationalLife.csv',
+        'capacity_to_activity_unit': 'CapacityToActivityUnit.csv',
+        'input_activity_ratio': 'InputActivityRatio.csv',
+        'output_activity_ratio': 'OutputActivityRatio.csv',
+        'capacity_factor': 'CapacityFactor.csv',
+        'availability_factor': 'AvailabilityFactor.csv',
+    }
+
+    def validate(self, sets: 'OSeMOSYSSets') -> None:
+        """
+        Validate efficiency and factor references.
+        
+        Raises
+        ------
+        ValueError
+            If references invalid or factors out of bounds.
+        """
+        # Validate OperationalLife
+        if not self.operational_life.empty:
+            techs = set(self.operational_life['TECHNOLOGY'].unique())
+            sets.validate_membership(techs, 'technologies', 'in OperationalLife')
+            
+            if (self.operational_life['VALUE'] <= 0).any():
+                raise ValueError("OperationalLife must be positive")
+        
+        # Validate InputActivityRatio
+        if not self.input_activity_ratio.empty:
+            techs = set(self.input_activity_ratio['TECHNOLOGY'].unique())
+            sets.validate_membership(techs, 'technologies', 'in InputActivityRatio')
+            
+            fuels = set(self.input_activity_ratio['FUEL'].unique())
+            sets.validate_membership(fuels, 'fuels', 'in InputActivityRatio')
+            
+            modes = set(self.input_activity_ratio['MODE_OF_OPERATION'].unique())
+            sets.validate_membership(modes, 'modes', 'in InputActivityRatio')
+        
+        # Validate OutputActivityRatio
+        if not self.output_activity_ratio.empty:
+            techs = set(self.output_activity_ratio['TECHNOLOGY'].unique())
+            sets.validate_membership(techs, 'technologies', 'in OutputActivityRatio')
+            
+            fuels = set(self.output_activity_ratio['FUEL'].unique())
+            sets.validate_membership(fuels, 'fuels', 'in OutputActivityRatio')
+        
+        # Validate CapacityFactor bounds
+        if not self.capacity_factor.empty:
+            vals = self.capacity_factor['VALUE']
+            if (vals < 0).any() or (vals > 1).any():
+                raise ValueError("CapacityFactor must be in range [0, 1]")
+        
+        # Validate AvailabilityFactor bounds
+        if not self.availability_factor.empty:
+            vals = self.availability_factor['VALUE']
+            if (vals < 0).any() or (vals > 1).any():
+                raise ValueError("AvailabilityFactor must be in range [0, 1]")
+            
+
+@dataclass(frozen=True)
 class EconomicsParameters:
     """
     Economics parameters owned by EconomicsComponent.
@@ -295,99 +391,3 @@ class EconomicsParameters:
             
             modes = set(self.variable_cost['MODE_OF_OPERATION'].unique())
             sets.validate_membership(modes, 'modes', 'in VariableCost')
-
-
-@dataclass(frozen=True)
-class PerformanceParameters:
-    """
-    Performance parameters (owned by SupplyComponent, facade in PerformanceComponent).
-    
-    Attributes
-    ----------
-    operational_life : pd.DataFrame
-        OperationalLife[r,t] - Asset lifetime in years.
-        Columns: REGION, TECHNOLOGY, VALUE
-    capacity_to_activity_unit : pd.DataFrame
-        CapacityToActivityUnit[r,t] - Conversion factor (default 8760).
-        Columns: REGION, TECHNOLOGY, VALUE
-    input_activity_ratio : pd.DataFrame
-        InputActivityRatio[r,t,f,m,y] - Input fuel per unit output.
-        Columns: REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR, VALUE
-    output_activity_ratio : pd.DataFrame
-        OutputActivityRatio[r,t,f,m,y] - Output per unit activity.
-        Columns: REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR, VALUE
-    capacity_factor : pd.DataFrame
-        CapacityFactor[r,t,l,y] - Max capacity utilization per timeslice.
-        Columns: REGION, TECHNOLOGY, TIMESLICE, YEAR, VALUE
-    availability_factor : pd.DataFrame
-        AvailabilityFactor[r,t,y] - Annual availability (0-1).
-        Columns: REGION, TECHNOLOGY, YEAR, VALUE
-    
-    Notes
-    -----
-    - CapacityFactor and AvailabilityFactor should be in range [0, 1]
-    - OperationalLife should be positive integer
-    """
-    operational_life: pd.DataFrame = field(default_factory=_empty_df)
-    capacity_to_activity_unit: pd.DataFrame = field(default_factory=_empty_df)
-    input_activity_ratio: pd.DataFrame = field(default_factory=_empty_df)
-    output_activity_ratio: pd.DataFrame = field(default_factory=_empty_df)
-    capacity_factor: pd.DataFrame = field(default_factory=_empty_df)
-    availability_factor: pd.DataFrame = field(default_factory=_empty_df)
-    
-    CSV_MAPPING = {
-        'operational_life': 'OperationalLife.csv',
-        'capacity_to_activity_unit': 'CapacityToActivityUnit.csv',
-        'input_activity_ratio': 'InputActivityRatio.csv',
-        'output_activity_ratio': 'OutputActivityRatio.csv',
-        'capacity_factor': 'CapacityFactor.csv',
-        'availability_factor': 'AvailabilityFactor.csv',
-    }
-    
-    def validate(self, sets: 'OSeMOSYSSets') -> None:
-        """
-        Validate efficiency and factor references.
-        
-        Raises
-        ------
-        ValueError
-            If references invalid or factors out of bounds.
-        """
-        # Validate OperationalLife
-        if not self.operational_life.empty:
-            techs = set(self.operational_life['TECHNOLOGY'].unique())
-            sets.validate_membership(techs, 'technologies', 'in OperationalLife')
-            
-            if (self.operational_life['VALUE'] <= 0).any():
-                raise ValueError("OperationalLife must be positive")
-        
-        # Validate InputActivityRatio
-        if not self.input_activity_ratio.empty:
-            techs = set(self.input_activity_ratio['TECHNOLOGY'].unique())
-            sets.validate_membership(techs, 'technologies', 'in InputActivityRatio')
-            
-            fuels = set(self.input_activity_ratio['FUEL'].unique())
-            sets.validate_membership(fuels, 'fuels', 'in InputActivityRatio')
-            
-            modes = set(self.input_activity_ratio['MODE_OF_OPERATION'].unique())
-            sets.validate_membership(modes, 'modes', 'in InputActivityRatio')
-        
-        # Validate OutputActivityRatio
-        if not self.output_activity_ratio.empty:
-            techs = set(self.output_activity_ratio['TECHNOLOGY'].unique())
-            sets.validate_membership(techs, 'technologies', 'in OutputActivityRatio')
-            
-            fuels = set(self.output_activity_ratio['FUEL'].unique())
-            sets.validate_membership(fuels, 'fuels', 'in OutputActivityRatio')
-        
-        # Validate CapacityFactor bounds
-        if not self.capacity_factor.empty:
-            vals = self.capacity_factor['VALUE']
-            if (vals < 0).any() or (vals > 1).any():
-                raise ValueError("CapacityFactor must be in range [0, 1]")
-        
-        # Validate AvailabilityFactor bounds
-        if not self.availability_factor.empty:
-            vals = self.availability_factor['VALUE']
-            if (vals < 0).any() or (vals > 1).any():
-                raise ValueError("AvailabilityFactor must be in range [0, 1]")

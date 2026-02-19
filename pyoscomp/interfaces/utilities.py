@@ -310,6 +310,7 @@ class ScenarioDataLoader:
         demand_component,
         supply_component,
         economics_component,
+        performance_component,
         validate: bool = True
     ) -> 'ScenarioData':
         """
@@ -327,9 +328,11 @@ class ScenarioDataLoader:
         demand_component : DemandComponent
             Component with demand data.
         supply_component : SupplyComponent
-            Component with technology data.
+            Component with technology registry and fuel/mode tracking.
         economics_component : EconomicsComponent
             Component with cost data.
+        performance_component : PerformanceComponent
+            Component with performance data (activity ratios, factors).
         validate : bool, optional
             If True, run validation after construction (default: True).
 
@@ -342,16 +345,10 @@ class ScenarioDataLoader:
         sets = OSeMOSYSSets(
             regions=frozenset(topology_component.regions_df['VALUE'].tolist()),
             years=frozenset(int(y) for y in time_component.years_df['VALUE'].tolist()),
-            technologies=frozenset(
-                supply_component.operational_life['TECHNOLOGY'].unique().tolist()
-                if not supply_component.operational_life.empty else []
-            ),
+            technologies=frozenset(supply_component.technologies),
             fuels=frozenset(supply_component.defined_fuels),
             emissions=frozenset(),  # Future: EmissionsComponent
-            modes=frozenset(
-                supply_component.input_activity_ratio['MODE_OF_OPERATION'].unique().tolist()
-                if not supply_component.input_activity_ratio.empty else []
-            ),
+            modes=frozenset(supply_component.modes),
             timeslices=frozenset(time_component.timeslices_df['VALUE'].tolist()),
             seasons=frozenset(time_component.seasons_df['VALUE'].tolist()),
             daytypes=frozenset(time_component.daytypes_df['VALUE'].tolist()),
@@ -381,23 +378,23 @@ class ScenarioDataLoader:
             residual_capacity=supply_component.residual_capacity.copy(),
         )
 
-        # Extract economics parameters
-        economics_params = EconomicsParameters(
-            discount_rate=economics_component.discount_rate_df.copy(),
-            discount_rate_idv=pd.DataFrame(),  # Not commonly used
-            capital_cost=economics_component.capital_cost_df.copy(),
-            variable_cost=economics_component.variable_cost_df.copy(),
-            fixed_cost=economics_component.fixed_cost_df.copy(),
-        )
-
         # Extract performance parameters
         performance_params = PerformanceParameters(
-            operational_life=supply_component.operational_life.copy(),
-            capacity_to_activity_unit=supply_component.capacity_to_activity_unit.copy(),
-            input_activity_ratio=supply_component.input_activity_ratio.copy(),
-            output_activity_ratio=supply_component.output_activity_ratio.copy(),
-            capacity_factor=supply_component.capacity_factor.copy(),
-            availability_factor=supply_component.availability_factor.copy(),
+            operational_life=performance_component.operational_life.copy(),
+            capacity_to_activity_unit=performance_component.capacity_to_activity_unit.copy(),
+            input_activity_ratio=performance_component.input_activity_ratio.copy(),
+            output_activity_ratio=performance_component.output_activity_ratio.copy(),
+            capacity_factor=performance_component.capacity_factor.copy(),
+            availability_factor=performance_component.availability_factor.copy(),
+        )
+
+        # Extract economics parameters
+        economics_params = EconomicsParameters(
+            discount_rate=economics_component.discount_rate.copy(),
+            discount_rate_idv=pd.DataFrame(),  # Not commonly used
+            capital_cost=economics_component.capital_cost.copy(),
+            variable_cost=economics_component.variable_cost.copy(),
+            fixed_cost=economics_component.fixed_cost.copy(),
         )
 
         return ScenarioData(

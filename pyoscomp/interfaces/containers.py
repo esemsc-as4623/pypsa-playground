@@ -153,6 +153,7 @@ class ScenarioData:
         demand_component,
         supply_component,
         economics_component,
+        performance_component,
         validate: bool = True
     ) -> 'ScenarioData':
         """
@@ -169,9 +170,11 @@ class ScenarioData:
         demand_component : DemandComponent
             Component with demand data.
         supply_component : SupplyComponent
-            Component with technology data.
+            Component with technology registry and fuel/mode tracking.
         economics_component : EconomicsComponent
             Component with cost data.
+        performance_component : PerformanceComponent
+            Component with performance data (activity ratios, factors).
         validate : bool, optional
             If True, run validation after construction (default: True).
 
@@ -187,6 +190,7 @@ class ScenarioData:
             demand_component,
             supply_component,
             economics_component,
+            performance_component,
             validate=validate
         )
 
