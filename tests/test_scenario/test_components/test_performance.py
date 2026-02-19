@@ -122,14 +122,14 @@ class TestCapacityFactorDelegation:
     def test_delegate_with_supply_calls_supply(self, complete_scenario_dir):
         """set_capacity_factor delegates to supply component."""
         supply = SupplyComponent(complete_scenario_dir)
-        perf = PerformanceComponent(complete_scenario_dir, supply)
-
         # Register technology first
         supply.add_technology(region='REGION1', technology='SOLAR_PV', operational_life=30)
 
         # Call through facade
+        perf = PerformanceComponent(complete_scenario_dir, supply)
         perf.set_capacity_factor(region='REGION1', technology='SOLAR_PV', bracket_weights={'Day': 0.25, 'Night': 0})
-
+        perf.process()
+        
         # Verify values were set via supply
         df = supply.capacity_factor
         assert len(df) > 0
@@ -160,6 +160,7 @@ class TestAvailabilityFactorDelegation:
 
         # Call through facade
         perf.set_availability_factor('REGION1', 'GAS_CCGT', 0.9)
+        perf.process()
 
         # Verify values were set via supply
         df = supply.availability_factor

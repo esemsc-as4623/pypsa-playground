@@ -80,10 +80,10 @@ class TestSimpleScenario:
         # Set conversion (efficiency)
         supply.set_conversion_technology('REGION1', 'GAS_CCGT',
                                          input_fuel='GAS', output_fuel='ELEC',
-                                         efficiency=0.5, mode='1', year=2026)
+                                         efficiency=0.5, mode='1')
         supply.set_conversion_technology('REGION1', 'GAS_TURBINE',
                                          input_fuel='GAS', output_fuel='ELEC',
-                                         efficiency=0.4, mode='1', year=2026)
+                                         efficiency=0.4, mode='1')
         
         supply.save()
         

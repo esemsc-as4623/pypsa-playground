@@ -412,15 +412,12 @@ class TestSetCapacityFactor:
 
     def test_capacity_factor_clamped(self, supply_with_tech):
         """Capacity factors clamped to [0, 1]."""
-        supply_with_tech.set_capacity_factor(
-            'REGION1', 'GAS_CCGT',
-            timeslice_weights={supply_with_tech.timeslices[0]: 1.5}  # > 1
-        )
-        supply_with_tech.process()
-
-        df = supply_with_tech.capacity_factor
-        # All values should be ≤ 1
-        assert (df['VALUE'] <= 1.0).all()
+        with pytest.raises(ValueError, match="validation failed"):
+            supply_with_tech.set_capacity_factor(
+                'REGION1', 'GAS_CCGT',
+                timeslice_weights={supply_with_tech.timeslices[0]: 1.5}  # > 1
+            )
+            supply_with_tech.process()
 
 
 # =============================================================================
@@ -523,7 +520,7 @@ class TestSupplyValidation:
         """Technology without outputs fails validation."""
         # Technology registered but no conversion set
 
-        with pytest.raises(ValueError, match="no outputs"):
+        with pytest.raises(ValueError, match="Activity ratio validation failed"):
             supply_with_tech.validate()
 
 

@@ -380,7 +380,7 @@ class TestDemandLoadSave:
 
     def test_round_trip(self, demand_component):
         """Save and load preserves data."""
-        demand_component.add_annual_demand('REGION1', 'ELEC', {2025: 100, 2030: 150})
+        demand_component.add_annual_demand('REGION1', 'ELEC', {2025: 100.0, 2030: 150.0})
         demand_component.process()
         demand_component.save()
 
