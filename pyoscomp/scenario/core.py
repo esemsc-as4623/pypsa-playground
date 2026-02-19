@@ -5,50 +5,81 @@ from typing import Optional
 from .components.topology import TopologyComponent
 from .components.time import TimeComponent
 from .components.demand import DemandComponent
+from .components.performance import PerformanceComponent
 from .components.supply import SupplyComponent
 from .components.economics import EconomicsComponent
-from .components.performance import PerformanceComponent
 from .validation.cross_reference import validate_scenario
 from ..interfaces import ScenarioData
 
 
 class Scenario:
     """
-    Scenario class for orchestrating all scenario components and ensuring cross-component reference integrity.
+    Scenario class for orchestrating all scenario components and ensuring
+    cross-component reference integrity.
+
+    Component creation order matters due to prerequisites:
+    1. TopologyComponent (no prerequisites)
+    2. TimeComponent (no prerequisites)
+    3. DemandComponent (requires topology + time)
+    4. PerformanceComponent (requires topology + time)
+    5. SupplyComponent (requires topology + time + performance)
+    6. EconomicsComponent (requires topology + time)
+
+    SupplyComponent's technology definition methods write performance data
+    (activity ratios, capacity factors, etc.) to PerformanceComponent via
+    a back-reference.
     """
     def __init__(self, scenario_dir: str):
         """
-        Initialize all scenario components and store the scenario directory path.
+        Initialize all scenario components and store the scenario directory
+        path.
 
         Parameters
         ----------
         scenario_dir : str
-            The full path to the scenario directory (e.g., /path/to/project/tag_123)
+            The full path to the scenario directory.
         """
         self.scenario_dir = scenario_dir
-        # Initialize components, passing the directory path down
+
+        # Initialize components in prerequisite order
         self.topology = TopologyComponent(scenario_dir)
         self.time = TimeComponent(scenario_dir)
         self.demand = DemandComponent(scenario_dir)
-        self.supply = SupplyComponent(scenario_dir)
+        self.performance = PerformanceComponent(scenario_dir)
+        self.supply = SupplyComponent(scenario_dir, performance=self.performance)
         self.economics = EconomicsComponent(scenario_dir)
-        # self.performance = PerformanceComponent(scenario_dir, self.supply)
-        # self.storage = StorageComponent(scenario_dir)  # Future component
-
 
     def build(self, return_data: bool = False) -> Optional[ScenarioData]:
         """
-        Finalize the scenario logic: load, process, validate, and save all components.
-        Runs cross-component reference validation after processing.
+        Finalize the scenario: load, process, validate, and save all
+        components. Runs cross-component reference validation after
+        processing.
+
+        Parameters
+        ----------
+        return_data : bool, optional
+            If True, return a ScenarioData instance built directly from
+            the in-memory components (default: False).
+
+        Returns
+        -------
+        ScenarioData or None
+            ScenarioData if return_data is True, else None.
+
+        Raises
+        ------
+        ValueError
+            If scenario validation fails.
         """
-        # Load all necessary data
+        # Load all components
         self.topology.load()
         self.time.load()
         self.demand.load()
+        self.performance.load()
         self.supply.load()
         self.economics.load()
 
-        # Process demand, supply
+        # Process demand, supply (supply.process writes to performance)
         self.demand.process()
         self.supply.process()
 
@@ -56,6 +87,7 @@ class Scenario:
         self.topology.save()
         self.time.save()
         self.demand.save()
+        self.performance.save()
         self.supply.save()
         self.economics.save()
 
@@ -68,5 +100,30 @@ class Scenario:
         print(f"Scenario built successfully in: {self.scenario_dir}")
 
         if return_data:
-            return ScenarioData.from_directory(self.scenario_dir)
+            return self.to_scenario_data()
         return None
+
+    def to_scenario_data(self, validate: bool = True) -> ScenarioData:
+        """
+        Convert in-memory components to ScenarioData without re-reading
+        CSV files.
+
+        Parameters
+        ----------
+        validate : bool, optional
+            If True, run ScenarioData validation (default: True).
+
+        Returns
+        -------
+        ScenarioData
+            Structured scenario data ready for translation.
+        """
+        return ScenarioData.from_components(
+            topology_component=self.topology,
+            time_component=self.time,
+            demand_component=self.demand,
+            supply_component=self.supply,
+            economics_component=self.economics,
+            performance_component=self.performance,
+            validate=validate,
+        )

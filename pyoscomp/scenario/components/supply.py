@@ -21,7 +21,7 @@ Prerequisites:
 
 import numpy as np
 import pandas as pd
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from .base import ScenarioComponent
 from .time import TimeComponent
@@ -84,12 +84,10 @@ class SupplyComponent(ScenarioComponent):
 
     owned_files = [
         'TECHNOLOGY.csv', 'FUEL.csv', 'MODE_OF_OPERATION.csv',
-        'CapacityToActivityUnit.csv', 'OperationalLife.csv',
-        'InputActivityRatio.csv', 'OutputActivityRatio.csv',
-        'CapacityFactor.csv', 'AvailabilityFactor.csv', 'ResidualCapacity.csv'
+        'ResidualCapacity.csv',
     ]
 
-    def __init__(self, scenario_dir: str):
+    def __init__(self, scenario_dir: str, performance=None):
         """
         Initialize supply component.
 
@@ -97,6 +95,9 @@ class SupplyComponent(ScenarioComponent):
         ----------
         scenario_dir : str
             Path to the scenario directory.
+        performance : PerformanceComponent, optional
+            Performance component instance for storing performance data.
+            Must be provided before calling technology definition methods.
 
         Raises
         ------
@@ -104,6 +105,9 @@ class SupplyComponent(ScenarioComponent):
             If TimeComponent or TopologyComponent not initialized.
         """
         super().__init__(scenario_dir)
+
+        # Performance component back-reference
+        self._perf = performance
 
         # Check prerequisites
         prereqs = self.check_prerequisites(
@@ -118,14 +122,8 @@ class SupplyComponent(ScenarioComponent):
         # Load time axis for capacity factor calculations
         self._time_axis = self._load_time_axis()
 
-        # Parameter DataFrames
-        self.capacity_to_activity_unit = self.init_dataframe("CapacityToActivityUnit")
-        self.operational_life = self.init_dataframe("OperationalLife")
+        # Supply-owned DataFrames only
         self.residual_capacity = self.init_dataframe("ResidualCapacity")
-        self.input_activity_ratio = self.init_dataframe("InputActivityRatio")
-        self.output_activity_ratio = self.init_dataframe("OutputActivityRatio")
-        self.capacity_factor = self.init_dataframe("CapacityFactor")
-        self.availability_factor = self.init_dataframe("AvailabilityFactor")
 
         # Tracking
         self.defined_tech: Set[Tuple[str, str]] = set()
@@ -161,7 +159,10 @@ class SupplyComponent(ScenarioComponent):
 
     def load(self) -> None:
         """
-        Load all supply parameter CSV files.
+        Load supply-owned parameter CSV files.
+
+        Performance parameters (OperationalLife, activity ratios, etc.)
+        are loaded by PerformanceComponent.
 
         Raises
         ------
@@ -170,29 +171,25 @@ class SupplyComponent(ScenarioComponent):
         ValueError
             If any file fails schema validation.
         """
-        self.capacity_to_activity_unit = self.read_csv("CapacityToActivityUnit.csv")
-        self.operational_life = self.read_csv("OperationalLife.csv")
         self.residual_capacity = self.read_csv("ResidualCapacity.csv")
-        self.input_activity_ratio = self.read_csv("InputActivityRatio.csv")
-        self.output_activity_ratio = self.read_csv("OutputActivityRatio.csv")
-        self.capacity_factor = self.read_csv("CapacityFactor.csv")
-        self.availability_factor = self.read_csv("AvailabilityFactor.csv")
 
-        # Rebuild tracking
-        self.defined_tech = set(
-            zip(
-                self.capacity_to_activity_unit['REGION'],
-                self.capacity_to_activity_unit['TECHNOLOGY']
-            )
-        )
-        self._rebuild_fuels_and_modes()
+        # Rebuild tracking from performance data
+        if self._perf is not None:
+            self.defined_tech = set(
+                zip(
+                    self._perf.capacity_to_activity_unit['REGION'],
+                    self._perf.capacity_to_activity_unit['TECHNOLOGY']
+                )
+            ) if not self._perf.capacity_to_activity_unit.empty else set()
+            self._rebuild_fuels_and_modes()
 
     def save(self) -> None:
         """
-        Save all supply parameter DataFrames to CSV.
+        Save supply-owned DataFrames to CSV.
 
-        Also generates TECHNOLOGY.csv, FUEL.csv, MODE_OF_OPERATION.csv sets
+        Generates TECHNOLOGY.csv, FUEL.csv, MODE_OF_OPERATION.csv sets
         based on defined technologies and activity ratios.
+        Performance parameters are saved by PerformanceComponent.
 
         Raises
         ------
@@ -208,24 +205,8 @@ class SupplyComponent(ScenarioComponent):
         self.write_dataframe("FUEL.csv", fuel_df)
         self.write_dataframe("MODE_OF_OPERATION.csv", mode_df)
 
-        # Save parameter CSVs
-        self._save_sorted("CapacityToActivityUnit.csv", self.capacity_to_activity_unit,
-                          ["REGION", "TECHNOLOGY", "VALUE"], ["REGION", "TECHNOLOGY"])
-        self._save_sorted("OperationalLife.csv", self.operational_life,
-                          ["REGION", "TECHNOLOGY", "VALUE"], ["REGION", "TECHNOLOGY"])
+        # Save supply-owned parameter CSVs
         self._save_sorted("ResidualCapacity.csv", self.residual_capacity,
-                          ["REGION", "TECHNOLOGY", "YEAR", "VALUE"],
-                          ["REGION", "TECHNOLOGY", "YEAR"])
-        self._save_sorted("InputActivityRatio.csv", self.input_activity_ratio,
-                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"],
-                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
-        self._save_sorted("OutputActivityRatio.csv", self.output_activity_ratio,
-                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR", "VALUE"],
-                          ["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"])
-        self._save_sorted("CapacityFactor.csv", self.capacity_factor,
-                          ["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR", "VALUE"],
-                          ["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR"])
-        self._save_sorted("AvailabilityFactor.csv", self.availability_factor,
                           ["REGION", "TECHNOLOGY", "YEAR", "VALUE"],
                           ["REGION", "TECHNOLOGY", "YEAR"])
 
@@ -288,16 +269,16 @@ class SupplyComponent(ScenarioComponent):
 
         self.defined_tech.add((region, technology))
 
-        # OperationalLife
+        # OperationalLife → PerformanceComponent
         ol_record = [{"REGION": region, "TECHNOLOGY": technology, "VALUE": operational_life}]
-        self.operational_life = self.add_to_dataframe(
-            self.operational_life, ol_record, key_columns=["REGION", "TECHNOLOGY"]
+        self._perf.operational_life = self.add_to_dataframe(
+            self._perf.operational_life, ol_record, key_columns=["REGION", "TECHNOLOGY"]
         )
 
-        # CapacityToActivityUnit
+        # CapacityToActivityUnit → PerformanceComponent
         cau_record = [{"REGION": region, "TECHNOLOGY": technology, "VALUE": capacity_to_activity_unit}]
-        self.capacity_to_activity_unit = self.add_to_dataframe(
-            self.capacity_to_activity_unit, cau_record, key_columns=["REGION", "TECHNOLOGY"]
+        self._perf.capacity_to_activity_unit = self.add_to_dataframe(
+            self._perf.capacity_to_activity_unit, cau_record, key_columns=["REGION", "TECHNOLOGY"]
         )
 
     # =========================================================================
@@ -371,12 +352,12 @@ class SupplyComponent(ScenarioComponent):
                 "MODE_OF_OPERATION": mode, "YEAR": y, "VALUE": out_ratio
             })
 
-        self.input_activity_ratio = self.add_to_dataframe(
-            self.input_activity_ratio, input_records,
+        self._perf.input_activity_ratio = self.add_to_dataframe(
+            self._perf.input_activity_ratio, input_records,
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
         )
-        self.output_activity_ratio = self.add_to_dataframe(
-            self.output_activity_ratio, output_records,
+        self._perf.output_activity_ratio = self.add_to_dataframe(
+            self._perf.output_activity_ratio, output_records,
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
         )
 
@@ -416,8 +397,8 @@ class SupplyComponent(ScenarioComponent):
                 "MODE_OF_OPERATION": "MODE1", "YEAR": y, "VALUE": 1.0
             })
 
-        self.output_activity_ratio = self.add_to_dataframe(
-            self.output_activity_ratio, output_records,
+        self._perf.output_activity_ratio = self.add_to_dataframe(
+            self._perf.output_activity_ratio, output_records,
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
         )
 
@@ -482,12 +463,12 @@ class SupplyComponent(ScenarioComponent):
 
             self._register_mode(region, technology, mode)
 
-        self.input_activity_ratio = self.add_to_dataframe(
-            self.input_activity_ratio, input_records,
+        self._perf.input_activity_ratio = self.add_to_dataframe(
+            self._perf.input_activity_ratio, input_records,
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
         )
-        self.output_activity_ratio = self.add_to_dataframe(
-            self.output_activity_ratio, output_records,
+        self._perf.output_activity_ratio = self.add_to_dataframe(
+            self._perf.output_activity_ratio, output_records,
             key_columns=["REGION", "TECHNOLOGY", "FUEL", "MODE_OF_OPERATION", "YEAR"]
         )
 
@@ -643,8 +624,8 @@ class SupplyComponent(ScenarioComponent):
             for y in self.years
         ]
 
-        self.availability_factor = self.add_to_dataframe(
-            self.availability_factor, records,
+        self._perf.availability_factor = self.add_to_dataframe(
+            self._perf.availability_factor, records,
             key_columns=["REGION", "TECHNOLOGY", "YEAR"]
         )
 
@@ -661,7 +642,8 @@ class SupplyComponent(ScenarioComponent):
 
         Call after all user input methods and before save().
         """
-        self._validate_activity_ratios()
+        if self._perf is not None:
+            self._perf.validate()
 
         # Generate capacity factor rows
         cf_rows = []
@@ -682,8 +664,8 @@ class SupplyComponent(ScenarioComponent):
                             "TIMESLICE": ts, "YEAR": year, "VALUE": 1.0
                         })
 
-        self.capacity_factor = self.add_to_dataframe(
-            self.capacity_factor, cf_rows,
+        self._perf.capacity_factor = self.add_to_dataframe(
+            self._perf.capacity_factor, cf_rows,
             key_columns=["REGION", "TECHNOLOGY", "TIMESLICE", "YEAR"]
         )
 
@@ -692,17 +674,17 @@ class SupplyComponent(ScenarioComponent):
         for region, tech in self.defined_tech:
             for year in self.years:
                 exists = (
-                    (self.availability_factor["REGION"] == region) &
-                    (self.availability_factor["TECHNOLOGY"] == tech) &
-                    (self.availability_factor["YEAR"] == year)
+                    (self._perf.availability_factor["REGION"] == region) &
+                    (self._perf.availability_factor["TECHNOLOGY"] == tech) &
+                    (self._perf.availability_factor["YEAR"] == year)
                 ).any()
                 if not exists:
                     af_rows.append({
                         "REGION": region, "TECHNOLOGY": tech, "YEAR": year, "VALUE": 1.0
                     })
 
-        self.availability_factor = self.add_to_dataframe(
-            self.availability_factor, af_rows,
+        self._perf.availability_factor = self.add_to_dataframe(
+            self._perf.availability_factor, af_rows,
             key_columns=["REGION", "TECHNOLOGY", "YEAR"]
         )
 
@@ -714,47 +696,16 @@ class SupplyComponent(ScenarioComponent):
         """
         Validate supply component state.
 
+        Delegates activity ratio validation to PerformanceComponent.
+
         Raises
         ------
         ValueError
             If technologies have no outputs, modes inconsistent, or
             activity ratios non-positive.
         """
-        self._validate_activity_ratios()
-
-    def _validate_activity_ratios(self) -> None:
-        """Validate activity ratio consistency."""
-        errors = []
-
-        # Every technology needs at least one output
-        if self.output_activity_ratio.empty:
-            if self.defined_tech:
-                errors.append("No output activity ratios defined for any technology")
-        else:
-            techs_with_outputs = set(
-                zip(
-                    self.output_activity_ratio['REGION'],
-                    self.output_activity_ratio['TECHNOLOGY']
-                )
-            )
-            for region, tech in self.defined_tech:
-                if (region, tech) not in techs_with_outputs:
-                    errors.append(f"Technology '{tech}' in '{region}' has no outputs")
-
-        # Check for non-positive ratios
-        for df_name, df in [
-            ('InputActivityRatio', self.input_activity_ratio),
-            ('OutputActivityRatio', self.output_activity_ratio)
-        ]:
-            if not df.empty and (df['VALUE'] <= 0).any():
-                bad = df[df['VALUE'] <= 0]
-                for _, row in bad.iterrows():
-                    errors.append(
-                        f"Non-positive {df_name}: {row['TECHNOLOGY']} year {row['YEAR']}"
-                    )
-
-        if errors:
-            raise ValueError("Activity ratio validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
+        if self._perf is not None:
+            self._perf.validate()
 
     def _validate_technology(self, region: str, technology: str) -> None:
         """Validate technology is registered."""
@@ -795,15 +746,15 @@ class SupplyComponent(ScenarioComponent):
         return df
 
     def _rebuild_fuels_and_modes(self) -> None:
-        """Rebuild tracking sets from loaded DataFrames."""
+        """Rebuild tracking sets from PerformanceComponent DataFrames."""
         self.defined_fuels = set()
-        if not self.input_activity_ratio.empty:
-            self.defined_fuels.update(self.input_activity_ratio['FUEL'].unique())
-        if not self.output_activity_ratio.empty:
-            self.defined_fuels.update(self.output_activity_ratio['FUEL'].unique())
+        if not self._perf.input_activity_ratio.empty:
+            self.defined_fuels.update(self._perf.input_activity_ratio['FUEL'].unique())
+        if not self._perf.output_activity_ratio.empty:
+            self.defined_fuels.update(self._perf.output_activity_ratio['FUEL'].unique())
 
         self._mode_definitions = {}
-        for df in [self.input_activity_ratio, self.output_activity_ratio]:
+        for df in [self._perf.input_activity_ratio, self._perf.output_activity_ratio]:
             if not df.empty:
                 for _, row in df.iterrows():
                     key = (row['REGION'], row['TECHNOLOGY'])

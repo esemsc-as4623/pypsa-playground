@@ -9,8 +9,8 @@ from .topology import TopologyComponent
 from .time import TimeComponent
 from .demand import DemandComponent
 from .supply import SupplyComponent
-from .economics import EconomicsComponent
 from .performance import PerformanceComponent
+from .economics import EconomicsComponent
 
 __all__ = [
     'ScenarioComponent',
@@ -18,6 +18,6 @@ __all__ = [
     'TimeComponent',
     'DemandComponent',
     'SupplyComponent',
+    'PerformanceComponent',
     'EconomicsComponent',
-    'PerformanceComponent'
 ]
