@@ -558,6 +558,12 @@ def validate_coverage(self) -> bool:
 
 ## 8. Testing & Validation
 
+To test any code on the terminal, first activate the correct python environment:
+
+```bash
+source /Users/as4623/pypsa-playground/.venv/bin/activate
+```
+
 ### 8.1 Built-in Validation
 
 Always validate that transformations preserve invariants:
