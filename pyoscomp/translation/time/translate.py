@@ -1,7 +1,7 @@
 # pyoscomp/translation/time/translate.py
 
 import pandas as pd
-from datetime import time, date, timedelta
+from datetime import datetime, time, date, timedelta
 from typing import List, Set, Dict, Union, Tuple
 
 from ...constants import ENDOFDAY, hours_in_year
@@ -449,7 +449,7 @@ def create_map(snapshots: Union[pd.DatetimeIndex, pd.Index],
     return snapshot_to_timeslice
 
 
-def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResult:
+def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp], List[datetime]]) -> TimesliceResult:
     """
     Convert PyPSA sequential snapshots to OSeMOSYS hierarchical timeslice structure.
     
@@ -463,6 +463,11 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResu
         PyPSA snapshot timestamps. Must contain datetime-like values that can be
         converted to pd.DatetimeIndex. The function extracts unique dates and times
         to construct the OSeMOSYS time structure.
+
+        - **pd.DatetimeIndex**: Native PyPSA format (recommended)
+        - **pd.Index**: Will be converted if contains datetime-parseable values
+        - **List[pd.Timestamp]**: List of pandas Timestamp objects
+        - **List[datetime]**: List of Python datetime objects
     
     Returns
     -------
@@ -477,6 +482,8 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResu
     ValueError
         If timeslice structure does not cover the entire year (validation fails).
         This can occur if snapshots have gaps or inconsistent temporal coverage.
+    TypeError
+        If snapshots contains non-datetime objects or cannot be converted.
     
     Notes
     -----
@@ -578,7 +585,14 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResu
     # 1. Validate input, convert, and sort
     if len(snapshots) == 0:
         raise ValueError("snapshots cannot be empty")
-    snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
+    try:
+        snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
+    except (TypeError, ValueError) as e:
+        raise TypeError(
+            f"snapshots must contain datetime-like values. "
+            f"If you have date strings, convert them first with pd.to_datetime(). "
+            f"Original error: {e}"
+        ) from e
     years = sorted(snapshots.year.unique().tolist())
     
     # 2. Initialize containers
