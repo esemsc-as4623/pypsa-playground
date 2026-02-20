@@ -460,6 +460,7 @@ class TestSnapshotResultApplyToNetwork:
                 self.snapshot_weightings = {
                     'objective': None,
                     'generators': None,
+                    'stores': None,
                 }
 
             def set_snapshots(self, snapshots):
@@ -478,18 +479,22 @@ class TestSnapshotResultApplyToNetwork:
             weightings=weightings,
             timeslice_names=timeslices,
         )
-
         result.apply_to_network(network)
 
         assert network.snapshots is not None
         pd.testing.assert_index_equal(network.snapshots, snapshots)
+        weightings.name = "objective"
         pd.testing.assert_series_equal(
             network.snapshot_weightings['objective'], weightings,
         )
+        weightings.name = "generators"
         pd.testing.assert_series_equal(
             network.snapshot_weightings['generators'], weightings,
         )
-
+        weightings.name = "stores"
+        pd.testing.assert_series_equal(
+            network.snapshot_weightings['stores'], weightings,
+        )
 
 # ---------------------------------------------------------------------------
 # Tests – round-trip consistency
