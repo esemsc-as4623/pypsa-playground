@@ -4,7 +4,8 @@
 ScenarioData interface module for PyPSA-OSeMOSYS translation.
 
 This module provides the typed interface that bridges scenario building
-(components) and model translation.
+(components) and model translation, as well as the harmonized result
+containers for cross-model comparison.
 """
 
 from .sets import OSeMOSYSSets
@@ -24,6 +25,12 @@ from .utilities import (
     save_set_csv,
     save_param_csv,
 )
+from .results import (
+    TopologyResult,
+    SupplyResult,
+    ModelResults,
+    compare,
+)
 
 __all__ = [
     # Sets
@@ -34,8 +41,14 @@ __all__ = [
     'SupplyParameters',
     'PerformanceParameters',
     'EconomicsParameters',
-    # Container
+    # Input container
     'ScenarioData',
+    # Output containers
+    'TopologyResult',
+    'SupplyResult',
+    'ModelResults',
+    # Comparison
+    'compare',
     # Utilities
     'ScenarioDataLoader',
     'ScenarioDataExporter',
