@@ -218,6 +218,7 @@ def run_osemosys(
     """
     import time
     import subprocess
+    import importlib.resources
     
     result = ModelResult(model_name='osemosys')
     
@@ -247,14 +248,9 @@ def run_osemosys(
         # Find config file
         if config_file is None:
             # Look for config in standard locations
-            possible_configs = [
-                input_dir / 'osemosys_config.yaml',
-                Path(__file__).parent / 'osemosys_config.yaml',
-            ]
-            for cfg in possible_configs:
-                if cfg.exists():
-                    config_file = str(cfg)
-                    break
+            config_file = importlib.resources.files("pyoscomp").joinpath(
+                "osemosys_config.yaml"
+            )
             if config_file is None:
                 raise FileNotFoundError(
                     "No OSeMOSYS config file found. Provide config_file parameter."
