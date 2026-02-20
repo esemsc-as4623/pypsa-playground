@@ -1,0 +1,491 @@
+### Components & Parameters
+
+#### 1. Component Type Hierarchy
+
+PyPSA is a Python-based open-source framework for:
+* Power system analysis and optimization
+* Sector-coupled energy system modeling (electricity, heat, hydrogen, fuels, CO₂, etc.)
+* Capacity expansion planning (CEP)
+* Unit commitment (UC)
+* Multi-period investment optimization
+* Stochastic programming
+
+PyPSA models systems as **networks** composed of components connected by **buses**, with optimization formulated as a **linear or mixed-integer linear program** using *linopy*.  
+
+**Core Component Types (14 total)**
+
+1. **Bus** - Network nodes enforcing energy conservation
+2. **Carrier** - Energy carrier/technology descriptors
+3. **Generator** - Power generation/supply
+4. **Load** - Power demand/consumption
+5. **Store** - Energy storage with independent power/energy capacity
+6. **StorageUnit** - Energy storage with coupled power/energy capacity
+7. **Line** - Passive AC/DC transmission lines
+8. **Transformer** - 2-winding voltage transformation
+9. **Link** - Controllable power flow connections (multi-port capable)
+10. **ShuntImpedance** - Reactive compensation
+11. **LineType** - Standard line type definitions
+12. **TransformerType** - Standard transformer type definitions
+13. **GlobalConstraint** - System-wide constraints
+14. **SubNetwork** - Network topology grouping
+
+**Component Categorization**
+
+**One-Port Components** (connect to single bus):
+- Generator, Load, StorageUnit, Store, ShuntImpedance
+
+**Branch Components** (connect multiple buses):
+- Line, Transformer, Link
+
+**Passive Branch Components** (power flow determined by impedances):
+- Line, Transformer
+
+**Controllable Components**:
+- Generator, Load, StorageUnit, Store, Link
+
+#### 2. Detailed Component Parameters
+
+##### **A. Bus Component**
+
+**Primary Function**: Network node enforcing energy conservation (Kirchhoff's current law)
+
+**Key Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|Description|
+|---|---|---|---|---|---|
+|`name`|-|unique string|Static|Required|Unique identifier|
+|`v_nom`|kV|> 0|Static|Optional (default: 1.0)|Nominal voltage|
+|`carrier`|-|string|Static|Optional (default: "AC")|Energy carrier type (AC, DC, heat, hydrogen, etc.)|
+|`type`|-|string|Static|Optional|Bus type for power flow|
+|`unit`|-|string|Static|Optional|Physical unit of carrier|
+|`x`|degrees|[-180, 180]|Static|Optional|Longitude for visualization|
+|`y`|degrees|[-90, 90]|Static|Optional|Latitude for visualization|
+|`control`|-|PQ/PV/Slack|Static|Optional|Power flow control strategy|
+|`v_mag_pu`|per unit|[0, 2] typical|Dynamic (output)|N/A|Voltage magnitude result|
+|`v_ang`|radians|[-π, π]|Dynamic (output)|N/A|Voltage angle result|
+|`p`|MW|unconstrained|Dynamic (output)|N/A|Active power injection|
+|`q`|MVAr|unconstrained|Dynamic (output)|N/A|Reactive power injection|
+
+##### **B. Generator Component**
+
+**Primary Function**: Power generation/supply to bus
+
+**Capacity Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`p_nom`|MW|≥ 0|Static|Optional (default: 0.0)|
+|`p_nom_extendable`|boolean|-|Static|Optional (default: False)|
+|`p_nom_min`|MW|≥ 0|Static|Optional (default: 0.0)|
+|`p_nom_max`|MW|≥ p_nom_min|Static|Optional (default: ∞)|
+|`p_nom_opt`|MW|[p_nom_min, p_nom_max]|Static (output)|N/A|
+|`p_nom_mod`|MW|> 0|Static|Optional|
+
+**Operational Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`p_min_pu`|per unit|[0, 1]|Dynamic|Optional (default: 0.0)|
+|`p_max_pu`|per unit|[0, 1]|Dynamic|Optional (default: 1.0)|
+|`p_set`|MW|≥ 0|Dynamic|Optional|
+|`sign`|-|±1|Static|Optional (default: 1)|
+|`efficiency`|per unit|(0, 1]|Static|Optional (default: 1.0)|
+
+**Cost Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`capital_cost`|€/MW|≥ 0|Static|Optional (default: 0.0)|
+|`marginal_cost`|€/MWh|unconstrained|Dynamic|Optional (default: 0.0)|
+
+**Volume Limit Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`e_sum_min`|MWh|≥ 0|Static|Optional|
+|`e_sum_max`|MWh|≥ e_sum_min|Static|Optional|
+
+**Unit Commitment Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`committable`|boolean|-|Static|Optional (default: False)|
+|`start_up_cost`|€|≥ 0|Static|Optional (default: 0.0)|
+|`shut_down_cost`|€|≥ 0|Static|Optional (default: 0.0)|
+|`min_up_time`|hours|≥ 0|Static|Optional (default: 0)|
+|`min_down_time`|hours|≥ 0|Static|Optional (default: 0)|
+|`up_time_before`|hours|≥ 0|Static|Optional (default: 0)|
+|`down_time_before`|hours|≥ 0|Static|Optional (default: 0)|
+|`ramp_limit_up`|per unit/h|[0, 1]|Static|Optional|
+|`ramp_limit_down`|per unit/h|[0, 1]|Static|Optional|
+|`ramp_limit_start_up`|per unit|[0, 1]|Static|Optional|
+|`ramp_limit_shut_down`|per unit|[0, 1]|Static|Optional|
+
+**Other Parameters**:
+- `bus` (string, required): Bus connection
+- `carrier` (string, optional): Technology/fuel type
+- `type` (string, optional): Generator type placeholder
+- `control` (string, optional): Control strategy (PQ/PV)
+- `build_year` (int, optional): Investment year
+- `lifetime` (years, optional): Asset lifetime
+
+##### **C. Load Component**
+
+**Primary Function**: Power demand/consumption
+
+**Key Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`bus`|-|string|Static|Required|
+|`p_set`|MW|unconstrained|Dynamic|Optional (default: 0.0)|
+|`q_set`|MVAr|unconstrained|Dynamic|Optional (default: 0.0)|
+|`sign`|-|±1|Static|Optional (default: 1)|
+|`carrier`|-|string|Static|Optional|
+
+**Note**: Positive p_set represents consumption; negative can represent exogenous supply.
+
+##### **D. StorageUnit Component**
+
+**Primary Function**: Energy storage with **coupled** power and energy capacity (e_nom = p_nom × max_hours)
+
+**Capacity Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`p_nom`|MW|≥ 0|Static|Optional (default: 0.0)|
+|`p_nom_extendable`|boolean|-|Static|Optional (default: False)|
+|`p_nom_min`|MW|≥ 0|Static|Optional (default: 0.0)|
+|`p_nom_max`|MW|≥ p_nom_min|Static|Optional|
+|`p_nom_opt`|MW|-|Static (output)|N/A|
+|`max_hours`|hours|> 0|Static|Optional (default: 1.0)|
+
+**Operational Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`p_min_pu`|per unit|[-1, 0]|Dynamic|Optional (default: -1.0)|
+|`p_max_pu`|per unit|[0, 1]|Dynamic|Optional (default: 1.0)|
+|`efficiency_store`|per unit|(0, 1]|Static|Optional (default: 1.0)|
+|`efficiency_dispatch`|per unit|(0, 1]|Static|Optional (default: 1.0)|
+|`standing_loss`|per unit|[0, 1]|Static|Optional (default: 0.0)|
+|`inflow`|MW|≥ 0|Dynamic|Optional (default: 0.0)|
+|`state_of_charge_initial`|MWh|≥ 0|Static|Optional|
+|`state_of_charge_set`|MWh|≥ 0|Dynamic|Optional|
+|`cyclic_state_of_charge`|boolean|-|Static|Optional (default: False)|
+
+**Operational Variables** (3 types):
+- `p_dispatch` (MW, dynamic output): Discharge power (≥ 0)
+- `p_store` (MW, dynamic output): Charge power (≥ 0)
+- `state_of_charge` (MWh, dynamic output): Energy level
+- `spill` (MW, dynamic output): Energy spillage
+
+**Cost Parameters**:
+- `capital_cost` (€/MW, static)
+- `marginal_cost` (€/MWh, dynamic)
+
+##### **E. Store Component**
+
+**Primary Function**: Energy storage with **independent** power and energy capacity optimization
+
+**Capacity Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`e_nom`|MWh|≥ 0|Static|Optional (default: 0.0)|
+|`e_nom_extendable`|boolean|-|Static|Optional (default: False)|
+|`e_nom_min`|MWh|≥ 0|Static|Optional (default: 0.0)|
+|`e_nom_max`|MWh|≥ e_nom_min|Static|Optional|
+|`e_nom_opt`|MWh|-|Static (output)|N/A|
+
+**Operational Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`e_min_pu`|per unit|[0, 1]|Static|Optional (default: 0.0)|
+|`e_max_pu`|per unit|[0, 1]|Static|Optional (default: 1.0)|
+|`e_initial`|MWh|≥ 0|Static|Optional (default: 0.0)|
+|`e_cyclic`|boolean|-|Static|Optional (default: False)|
+|`standing_loss`|per unit|[0, 1]|Static|Optional (default: 0.0)|
+
+**Cost Parameters**:
+- `capital_cost` (€/MWh, static)
+- `marginal_cost` (€/MWh, dynamic)
+
+**Note**: Stores connect to a bus and require separate Link components for charging/discharging with power capacity limits.
+
+##### **F. Line Component**
+
+**Primary Function**: Passive AC/DC transmission with impedance-based power flow
+
+**Network Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`bus0`|-|string|Static|Required|
+|`bus1`|-|string|Static|Required|
+|`type`|-|string|Static|Optional|
+|`length`|km|> 0|Static|Optional (default: 1.0)|
+
+**Electrical Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`r`|Ω|≥ 0|Static|Optional (default: 0.0)|
+|`x`|Ω|> 0 (for AC)|Static|Required|
+|`g`|S|≥ 0|Static|Optional (default: 0.0)|
+|`b`|S|unconstrained|Static|Optional (default: 0.0)|
+
+**Capacity Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`s_nom`|MVA|≥ 0|Static|Optional (default: 0.0)|
+|`s_nom_extendable`|boolean|-|Static|Optional (default: False)|
+|`s_nom_min`|MVA|≥ 0|Static|Optional (default: 0.0)|
+|`s_nom_max`|MVA|≥ s_nom_min|Static|Optional|
+|`s_nom_opt`|MVA|-|Static (output)|N/A|
+|`s_nom_mod`|MVA|> 0|Static|Optional|
+|`s_max_pu`|per unit|[0, 1]|Dynamic|Optional (default: 1.0)|
+
+**Cost Parameters**:
+- `capital_cost` (€/MVA, static)
+- `num_parallel` (integer ≥ 1, static): Parallel lines
+
+**Operational Variables** (outputs):
+- `p0`, `p1` (MW, dynamic): Active power flow at each end
+- `q0`, `q1` (MVAr, dynamic): Reactive power flow at each end
+- `s` (MVA, dynamic): Apparent power flow
+
+##### **G. Transformer Component**
+
+**Primary Function**: 2-winding voltage transformation (passive)
+
+**Network Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`bus0`|-|string|Static|Required|
+|`bus1`|-|string|Static|Required|
+|`type`|-|string|Static|Optional|
+
+**Electrical Parameters** (similar to Line):
+- `r`, `x`, `g`, `b` (Ω or S)
+- `s_nom`, `s_nom_extendable`, `s_nom_min`, `s_nom_max`, `s_nom_opt`
+- `s_max_pu` (per unit, dynamic)
+- `tap_ratio` (per unit, static): Voltage ratio
+- `tap_position` (integer, static): Tap changer position
+- `phase_shift` (degrees, static): Phase shift angle
+
+**Cost Parameters**:
+- `capital_cost` (€/MVA)
+- `num_parallel` (integer ≥ 1)
+
+##### **H. Link Component**
+
+**Primary Function**: Controllable power flow connection with multi-port capability (sector coupling)
+
+**Network Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`bus0`|-|string|Static|Required|
+|`bus1`|-|string|Static|Required|
+|`bus2`, `bus3`, ...|-|string|Static|Optional|
+
+**Capacity Parameters**:
+
+| Parameter          | Unit    | Constraint/Range | Time-Dependent  | Required/Optional         |
+| ------------------ | ------- | ---------------- | --------------- | ------------------------- |
+| `p_nom`            | MW      | ≥ 0              | Static          | Optional (default: 0.0)   |
+| `p_nom_extendable` | boolean | -                | Static          | Optional (default: False) |
+| `p_nom_min`        | MW      | ≥ 0              | Static          | Optional (default: 0.0)   |
+| `p_nom_max`        | MW      | ≥ p_nom_min      | Static          | Optional                  |
+| `p_nom_opt`        | MW      | -                | Static (output) | N/A                       |
+| `p_nom_mod`        | MW      | > 0              | Static          | Optional                  |
+
+**Operational Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`p_min_pu`|per unit|[-1, 0]|Dynamic|Optional (default: 0.0)|
+|`p_max_pu`|per unit|[0, 1]|Dynamic|Optional (default: 1.0)|
+|`p_set`|MW|unconstrained|Dynamic|Optional|
+|`efficiency`|per unit|(0, 1]|Dynamic|Optional (default: 1.0)|
+|`efficiency2`, `efficiency3`, ...|per unit|(-∞, ∞)|Dynamic|Optional|
+
+**Note**: Negative efficiency values indicate input (consumption) at that port; positive values indicate output.
+
+**Unit Commitment Parameters** (same as Generator):
+- `committable`, `start_up_cost`, `shut_down_cost`
+- `min_up_time`, `min_down_time`
+- `ramp_limit_up`, `ramp_limit_down`
+
+**Cost Parameters**:
+- `capital_cost` (€/MW)
+- `marginal_cost` (€/MWh, dynamic)
+
+**Volume Limits**:
+- `e_sum_min`, `e_sum_max` (MWh): Total energy flow constraints
+
+##### **I. ShuntImpedance Component**
+
+**Primary Function**: Reactive power compensation (capacitors/reactors)
+
+**Key Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`bus`|-|string|Static|Required|
+|`g`|S|≥ 0|Static|Optional (default: 0.0)|
+|`b`|S|unconstrained|Static|Optional (default: 0.0)|
+
+##### **J. Carrier Component**
+
+**Primary Function**: Energy carrier/technology descriptor
+
+**Key Parameters**:
+
+|Parameter|Unit|Constraint/Range|Time-Dependent|Required/Optional|
+|---|---|---|---|---|
+|`name`|-|unique string|Static|Required|
+|`nice_name`|-|string|Static|Optional|
+|`color`|-|hex/string|Static|Optional|
+|`co2_emissions`|tCO₂/MWh|≥ 0|Static|Optional (default: 0.0)|
+|`max_growth`|MW/period|unconstrained|Static|Optional|
+|`max_capacity`|MW|≥ 0|Static|Optional|
+
+#### 3. Parameter Classification Summary
+
+**Static Parameters** (fixed across time):
+- All capacity limits: `p_nom`, `s_nom`, `e_nom`, `*_nom_min/max`
+- All cost parameters: `capital_cost`, `marginal_cost` (can be time-varying)
+- Network topology: `bus`, `bus0`, `bus1`
+- Technical specs: `efficiency`, `r`, `x`, `g`, `b` (mostly static)
+- Unit commitment: `committable`, `min_up_time`, `start_up_cost`
+
+**Dynamic Parameters** (time-series capable):
+- Availability: `p_max_pu`, `p_min_pu`, `s_max_pu`
+- Set points: `p_set`, `q_set`, `e_set`, `state_of_charge_set`
+- Operational inputs: `inflow`, `marginal_cost`
+- Efficiency can be time-varying for Links
+
+**Always Required**:
+- `name` (all components)
+- `bus` (one-port components)
+- `bus0`, `bus1` (branch components)
+- `x` (lines/transformers - must be non-zero for AC)
+
+**Commonly Optional with Defaults**:
+- All `*_nom` parameters (default: 0.0)
+- All `*_extendable` flags (default: False)
+- Efficiencies (default: 1.0)
+- Cost parameters (default: 0.0)
+
+#### 4. Multi-Period Investment Optimization
+
+PyPSA supports **multi-period capacity expansion** with:
+
+**Investment Period Parameters** (all capacity-extendable components):
+- `build_year` (integer): Investment period year
+- `lifetime` (years): Asset operational lifetime
+- Depreciation handling with `DepreciationMethod`
+
+**Capacity Tracking**:
+- Cumulative capacity across periods
+- Lifetime-based retirement
+- Period-specific investment decisions
+
+#### 5. Time-Series and Snapshot Handling
+
+Time modelled via snapshots
+Snapshot weightings convert MW to MWh in objectives
+Dynamic parameters stored as time series per component
+
+**Snapshot Configuration**:
+- `n.set_snapshots()`: Define temporal resolution
+- `snapshot_weightings`: Weight for objective function integration
+- Support for irregularly-spaced snapshots
+
+**Time-Dependent Attributes**:  
+Stored in `n.{component_name}_t.{attribute}` DataFrames:
+- Examples: `n.generators_t.p_max_pu`, `n.loads_t.p_set`
+- Dimensions: (snapshot × component_name)
+
+**Stochastic Optimization**:
+- Multi-scenario support with scenario probabilities
+- Two-stage stochastic programming capability
+- Scenario-weighted objective function
+#### 6. Constraint Categories
+
+##### **Capacity Constraints**
+- Upper/lower bounds: `*_nom_min`, `*_nom_max`
+- Fixed capacity: `*_nom_set`
+- Modularity: `*_nom_mod` (discrete investment)
+##### **Dispatch Constraints**
+- Per-unit limits: `p_min_pu`, `p_max_pu`
+- Volume limits: `e_sum_min`, `e_sum_max`
+- Unit commitment, ramp rate limits
+##### **Storage Constraints**
+- State-of-charge tracking
+- Cyclic boundary conditions
+- Standing losses
+- Inflow/spillage
+##### **Network Constraints**
+- Kirchhoff's voltage law (KVL) for passive branches
+- Nodal balance (KCL) at all buses
+- Line flow limits (N-1 security)
+##### **Global Constraints**
+- emissions
+- growth
+- GlobalConstraint component: imposes system-wide constraints
+
+| Parameter         | Description            |
+| ----------------- | ---------------------- |
+| type              | Constraint category    |
+| carrier_attribute | Attribute to constrain |
+| sense             | <=, >=, ==             |
+| constant          | Constraint value       |
+
+#### 7. Units Summary
+
+| Quantity        | Unit                       |
+| --------------- | -------------------------- |
+| Power           | MW                         |
+| Energy          | MWh                        |
+| Apparent Power  | MVA                        |
+| Reactive Power  | MVAr                       |
+| Efficiency      | [0, 1] dimensionless ratio |
+| Voltage         | kV                         |
+| Cost (capacity) | €/MW                       |
+| Cost (energy)   | €/MWh                      |
+| Distance        | km                         |
+| Impedance       | Ω (ohms), S (siemens)      |
+| Emissions       | tCO₂/MWh                   |
+
+
+#### 9. Key PyPSA Architecture Features
+
+##### Component Storage
+- Static data: `n.{component_name}` (DataFrame)
+- Dynamic data: `n.{component_name}_t` (dict of DataFrames)
+- New API: `n.c.{component_name}.static` and `n.c.{component_name}.dynamic`
+##### Optimization Features
+- **Economic Dispatch (ED)**: Short-term market dispatch
+- **Linear Optimal Power Flow (LOPF)**: Network-constrained dispatch
+- **Security-Constrained LOPF (SCLOPF)**: N-1 contingency analysis
+- **Capacity Expansion Planning (CEP)**: Long-term investment optimization
+- **Unit Commitment**: Binary on/off decisions for generators/links
+- **Modular Expansion**: Discrete capacity investments
+- **Multi-Period**: Pathway planning across multiple investment periods
+- **Stochastic Programming**: Uncertainty modeling with scenarios
+- **MGA (Modeling-to-Generate-Alternatives)**: Near-optimal solution space exploration
+##### Solver Support
+- Free solvers: HiGHS (default), GLPK, CBC
+- Commercial solvers: Gurobi, CPLEX, FICO Xpress
+- Optimization framework: linopy (linear optimization with N-D labeled variables)
+##### Network Analysis
+- Static power flow: Non-linear and linearized load flow (Newton-Raphson)
+- Contingency analysis: N-1 security assessment
+- Statistics: Energy balance, capacity factors, costs, emissions
+- Visualization: Geographic network plots, interactive exploration
