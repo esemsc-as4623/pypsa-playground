@@ -22,8 +22,8 @@ from .parameters import (
     TimeParameters,
     DemandParameters,
     SupplyParameters,
-    EconomicsParameters,
     PerformanceParameters,
+    EconomicsParameters,
 )
 from .containers import ScenarioData
 
@@ -269,7 +269,19 @@ class ScenarioDataLoader:
 
         # Load supply parameters
         supply_params = SupplyParameters(
+            operational_life=load_param_csv(path / 'OperationalLife.csv'),
             residual_capacity=load_param_csv(path / 'ResidualCapacity.csv'),
+        )
+
+        # Load performance parameters
+        performance_params = PerformanceParameters(
+            capacity_to_activity_unit=load_param_csv(path / 'CapacityToActivityUnit.csv'),
+            input_activity_ratio=load_param_csv(path / 'InputActivityRatio.csv'),
+            output_activity_ratio=load_param_csv(path / 'OutputActivityRatio.csv'),
+            capacity_factor=load_param_csv(path / 'CapacityFactor.csv'),
+            availability_factor=load_param_csv(path / 'AvailabilityFactor.csv'),
+            total_annual_max_capacity=load_param_csv(path / 'TotalAnnualMaxCapacity.csv', required=False),
+            total_annual_min_capacity=load_param_csv(path / 'TotalAnnualMinCapacity.csv', required=False),
         )
 
         # Load economics parameters
@@ -281,24 +293,14 @@ class ScenarioDataLoader:
             fixed_cost=load_param_csv(path / 'FixedCost.csv'),
         )
 
-        # Load performance parameters
-        performance_params = PerformanceParameters(
-            operational_life=load_param_csv(path / 'OperationalLife.csv'),
-            capacity_to_activity_unit=load_param_csv(path / 'CapacityToActivityUnit.csv'),
-            input_activity_ratio=load_param_csv(path / 'InputActivityRatio.csv'),
-            output_activity_ratio=load_param_csv(path / 'OutputActivityRatio.csv'),
-            capacity_factor=load_param_csv(path / 'CapacityFactor.csv'),
-            availability_factor=load_param_csv(path / 'AvailabilityFactor.csv'),
-        )
-
         # Create ScenarioData (validation runs in __post_init__ if validate=True)
         return ScenarioData(
             sets=sets,
             time=time_params,
             demand=demand_params,
             supply=supply_params,
-            economics=economics_params,
             performance=performance_params,
+            economics=economics_params,
             metadata={'source_dir': scenario_dir},
             _skip_validation=not validate,
         )
@@ -309,8 +311,8 @@ class ScenarioDataLoader:
         time_component,
         demand_component,
         supply_component,
-        economics_component,
         performance_component,
+        economics_component,
         validate: bool = True
     ) -> 'ScenarioData':
         """
@@ -329,10 +331,10 @@ class ScenarioDataLoader:
             Component with demand data.
         supply_component : SupplyComponent
             Component with technology registry and fuel/mode tracking.
-        economics_component : EconomicsComponent
-            Component with cost data.
         performance_component : PerformanceComponent
             Component with performance data (activity ratios, factors).
+        economics_component : EconomicsComponent
+            Component with cost data.
         validate : bool, optional
             If True, run validation after construction (default: True).
 
@@ -375,17 +377,19 @@ class ScenarioDataLoader:
 
         # Extract supply parameters
         supply_params = SupplyParameters(
+            operational_life=supply_component.operational_life.copy(),
             residual_capacity=supply_component.residual_capacity.copy(),
         )
 
         # Extract performance parameters
         performance_params = PerformanceParameters(
-            operational_life=performance_component.operational_life.copy(),
             capacity_to_activity_unit=performance_component.capacity_to_activity_unit.copy(),
             input_activity_ratio=performance_component.input_activity_ratio.copy(),
             output_activity_ratio=performance_component.output_activity_ratio.copy(),
             capacity_factor=performance_component.capacity_factor.copy(),
             availability_factor=performance_component.availability_factor.copy(),
+            total_annual_max_capacity=performance_component.total_annual_max_capacity.copy(),
+            total_annual_min_capacity=performance_component.total_annual_min_capacity.copy(),
         )
 
         # Extract economics parameters
@@ -402,8 +406,8 @@ class ScenarioDataLoader:
             time=time_params,
             demand=demand_params,
             supply=supply_params,
-            economics=economics_params,
             performance=performance_params,
+            economics=economics_params,
             metadata={'source': 'components'},
             _skip_validation=not validate,
         )
@@ -478,13 +482,6 @@ class ScenarioDataExporter:
         # Export supply parameters
         save_param_csv(data.supply.residual_capacity, path / 'ResidualCapacity.csv')
 
-        # Export economics parameters
-        save_param_csv(data.economics.discount_rate, path / 'DiscountRate.csv')
-        save_param_csv(data.economics.discount_rate_idv, path / 'DiscountRateIdv.csv')
-        save_param_csv(data.economics.capital_cost, path / 'CapitalCost.csv')
-        save_param_csv(data.economics.variable_cost, path / 'VariableCost.csv')
-        save_param_csv(data.economics.fixed_cost, path / 'FixedCost.csv')
-
         # Export performance parameters
         save_param_csv(data.performance.operational_life, path / 'OperationalLife.csv')
         save_param_csv(data.performance.capacity_to_activity_unit, path / 'CapacityToActivityUnit.csv')
@@ -492,3 +489,10 @@ class ScenarioDataExporter:
         save_param_csv(data.performance.output_activity_ratio, path / 'OutputActivityRatio.csv')
         save_param_csv(data.performance.capacity_factor, path / 'CapacityFactor.csv')
         save_param_csv(data.performance.availability_factor, path / 'AvailabilityFactor.csv')
+
+        # Export economics parameters
+        save_param_csv(data.economics.discount_rate, path / 'DiscountRate.csv')
+        save_param_csv(data.economics.discount_rate_idv, path / 'DiscountRateIdv.csv')
+        save_param_csv(data.economics.capital_cost, path / 'CapitalCost.csv')
+        save_param_csv(data.economics.variable_cost, path / 'VariableCost.csv')
+        save_param_csv(data.economics.fixed_cost, path / 'FixedCost.csv')

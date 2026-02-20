@@ -23,8 +23,8 @@ from .parameters import (
     TimeParameters,
     DemandParameters,
     SupplyParameters,
-    EconomicsParameters,
     PerformanceParameters,
+    EconomicsParameters,
 )
 
 
@@ -82,8 +82,8 @@ class ScenarioData:
     time: TimeParameters
     demand: DemandParameters
     supply: SupplyParameters
-    economics: EconomicsParameters
     performance: PerformanceParameters
+    economics: EconomicsParameters
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     # Internal flag to skip validation (used by loaders during construction)
@@ -115,8 +115,8 @@ class ScenarioData:
         self.time.validate(self.sets)
         self.demand.validate(self.sets)
         self.supply.validate(self.sets)
-        self.economics.validate(self.sets)
         self.performance.validate(self.sets)
+        self.economics.validate(self.sets)
 
     @classmethod
     def from_directory(cls, scenario_dir: str, validate: bool = True) -> 'ScenarioData':
@@ -152,8 +152,8 @@ class ScenarioData:
         time_component,
         demand_component,
         supply_component,
-        economics_component,
         performance_component,
+        economics_component,
         validate: bool = True
     ) -> 'ScenarioData':
         """
@@ -171,10 +171,10 @@ class ScenarioData:
             Component with demand data.
         supply_component : SupplyComponent
             Component with technology registry and fuel/mode tracking.
-        economics_component : EconomicsComponent
-            Component with cost data.
         performance_component : PerformanceComponent
             Component with performance data (activity ratios, factors).
+        economics_component : EconomicsComponent
+            Component with cost data.
         validate : bool, optional
             If True, run validation after construction (default: True).
 
@@ -189,8 +189,8 @@ class ScenarioData:
             time_component,
             demand_component,
             supply_component,
-            economics_component,
             performance_component,
+            economics_component,
             validate=validate
         )
 
@@ -257,13 +257,6 @@ class ScenarioData:
         # Supply parameters
         result['ResidualCapacity'] = self.supply.residual_capacity.copy()
 
-        # Economics parameters
-        result['DiscountRate'] = self.economics.discount_rate.copy()
-        result['DiscountRateIdv'] = self.economics.discount_rate_idv.copy()
-        result['CapitalCost'] = self.economics.capital_cost.copy()
-        result['VariableCost'] = self.economics.variable_cost.copy()
-        result['FixedCost'] = self.economics.fixed_cost.copy()
-
         # Performance parameters
         result['OperationalLife'] = self.performance.operational_life.copy()
         result['CapacityToActivityUnit'] = self.performance.capacity_to_activity_unit.copy()
@@ -271,6 +264,13 @@ class ScenarioData:
         result['OutputActivityRatio'] = self.performance.output_activity_ratio.copy()
         result['CapacityFactor'] = self.performance.capacity_factor.copy()
         result['AvailabilityFactor'] = self.performance.availability_factor.copy()
+
+        # Economics parameters
+        result['DiscountRate'] = self.economics.discount_rate.copy()
+        result['DiscountRateIdv'] = self.economics.discount_rate_idv.copy()
+        result['CapitalCost'] = self.economics.capital_cost.copy()
+        result['VariableCost'] = self.economics.variable_cost.copy()
+        result['FixedCost'] = self.economics.fixed_cost.copy()
 
         return result
 
@@ -320,12 +320,6 @@ class ScenarioData:
             'AccumulatedAnnualDemand': self.demand.accumulated_annual_demand,
             # Supply parameters
             'ResidualCapacity': self.supply.residual_capacity,
-            # Economics parameters
-            'DiscountRate': self.economics.discount_rate,
-            'DiscountRateIdv': self.economics.discount_rate_idv,
-            'CapitalCost': self.economics.capital_cost,
-            'VariableCost': self.economics.variable_cost,
-            'FixedCost': self.economics.fixed_cost,
             # Performance parameters
             'OperationalLife': self.performance.operational_life,
             'CapacityToActivityUnit': self.performance.capacity_to_activity_unit,
@@ -333,6 +327,12 @@ class ScenarioData:
             'OutputActivityRatio': self.performance.output_activity_ratio,
             'CapacityFactor': self.performance.capacity_factor,
             'AvailabilityFactor': self.performance.availability_factor,
+            # Economics parameters
+            'DiscountRate': self.economics.discount_rate,
+            'DiscountRateIdv': self.economics.discount_rate_idv,
+            'CapitalCost': self.economics.capital_cost,
+            'VariableCost': self.economics.variable_cost,
+            'FixedCost': self.economics.fixed_cost,
         }
         return param_map.get(name)
 

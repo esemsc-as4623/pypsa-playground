@@ -10,10 +10,6 @@ as immutable frozensets for type safety and efficient membership testing.
 from dataclasses import dataclass
 from typing import List, Set, FrozenSet, Union
 
-# Type alias for set contents
-SetType = FrozenSet[str]
-YearSetType = FrozenSet[int]
-
 
 @dataclass(frozen=True)
 class OSeMOSYSSets:
@@ -71,17 +67,17 @@ class OSeMOSYSSets:
     ... )
     >>> sets.validate_non_empty(['regions', 'years'])
     """
-    regions: SetType
-    years: YearSetType
-    technologies: SetType
-    fuels: SetType
-    emissions: SetType
-    modes: SetType
-    timeslices: SetType
-    seasons: SetType
-    daytypes: SetType
-    dailytimebrackets: SetType
-    storages: SetType
+    regions: FrozenSet[str]
+    years: FrozenSet[int]
+    technologies: FrozenSet[str]
+    fuels: FrozenSet[str]
+    emissions: FrozenSet[str]
+    modes: FrozenSet[str]
+    timeslices: FrozenSet[str]
+    seasons: FrozenSet[str]
+    daytypes: FrozenSet[str]
+    dailytimebrackets: FrozenSet[str]
+    storages: FrozenSet[str]
     
     # Required sets (must be non-empty for valid scenario)
     REQUIRED_SETS = ['regions', 'years', 'technologies', 'timeslices']

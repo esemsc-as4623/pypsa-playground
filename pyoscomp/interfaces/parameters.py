@@ -188,6 +188,9 @@ class SupplyParameters:
     
     Attributes
     ----------
+    operational_life : pd.DataFrame
+        OperationalLife[r,t] - Asset lifetime in years.
+        Columns: REGION, TECHNOLOGY, VALUE
     residual_capacity : pd.DataFrame
         ResidualCapacity[r,t,y] - Pre-installed capacity (power units).
         Columns: REGION, TECHNOLOGY, YEAR, VALUE
@@ -196,10 +199,13 @@ class SupplyParameters:
     -----
     - ResidualCapacity represents existing infrastructure
     - Technologies must exist in the TECHNOLOGY set
+    - OperationalLife should be positive integer
     """
+    operational_life: pd.DataFrame = field(default_factory=_empty_df)
     residual_capacity: pd.DataFrame = field(default_factory=_empty_df)
     
     CSV_MAPPING = {
+        'operational_life': 'OperationalLife.csv',
         'residual_capacity': 'ResidualCapacity.csv',
     }
     
@@ -212,6 +218,12 @@ class SupplyParameters:
         ValueError
             If referenced technologies/regions/years not in sets.
         """
+        if not self.operational_life.empty:
+            techs = set(self.operational_life['TECHNOLOGY'].unique())
+            sets.validate_membership(techs, 'technologies', 'in OperationalLife')
+            if (self.operational_life['VALUE'] <= 0).any():
+                raise ValueError("OperationalLife must be positive")
+
         if not self.residual_capacity.empty:
             techs = set(self.residual_capacity['TECHNOLOGY'].unique())
             sets.validate_membership(techs, 'technologies', 'in ResidualCapacity')
@@ -223,13 +235,10 @@ class SupplyParameters:
 @dataclass(frozen=True)
 class PerformanceParameters:
     """
-    Performance parameters (owned by SupplyComponent, facade in PerformanceComponent).
+    Performance parameters owned by PerformanceComponent.
     
     Attributes
     ----------
-    operational_life : pd.DataFrame
-        OperationalLife[r,t] - Asset lifetime in years.
-        Columns: REGION, TECHNOLOGY, VALUE
     capacity_to_activity_unit : pd.DataFrame
         CapacityToActivityUnit[r,t] - Conversion factor (default 8760).
         Columns: REGION, TECHNOLOGY, VALUE
@@ -245,26 +254,34 @@ class PerformanceParameters:
     availability_factor : pd.DataFrame
         AvailabilityFactor[r,t,y] - Annual availability (0-1).
         Columns: REGION, TECHNOLOGY, YEAR, VALUE
+    total_annual_max_capacity : pd.DataFrame
+        TotalAnnualMaxCapacity[r,t,y] - Upper bound on capacity.
+        Columns: REGION, TECHNOLOGY, YEAR, VALUE
+    total_annual_min_capacity : pd.DataFrame
+        TotalAnnualMinCapacity[r,t,y] - Lower bound on capacity.
+        Columns: REGION, TECHNOLOGY, YEAR, VALUE
     
     Notes
     -----
     - CapacityFactor and AvailabilityFactor should be in range [0, 1]
-    - OperationalLife should be positive integer
+    - TotalAnnualMaxCapacity default of -1 means unlimited
     """
-    operational_life: pd.DataFrame = field(default_factory=_empty_df)
     capacity_to_activity_unit: pd.DataFrame = field(default_factory=_empty_df)
     input_activity_ratio: pd.DataFrame = field(default_factory=_empty_df)
     output_activity_ratio: pd.DataFrame = field(default_factory=_empty_df)
     capacity_factor: pd.DataFrame = field(default_factory=_empty_df)
     availability_factor: pd.DataFrame = field(default_factory=_empty_df)
+    total_annual_max_capacity: pd.DataFrame = field(default_factory=_empty_df)
+    total_annual_min_capacity: pd.DataFrame = field(default_factory=_empty_df)
     
     CSV_MAPPING = {
-        'operational_life': 'OperationalLife.csv',
         'capacity_to_activity_unit': 'CapacityToActivityUnit.csv',
         'input_activity_ratio': 'InputActivityRatio.csv',
         'output_activity_ratio': 'OutputActivityRatio.csv',
         'capacity_factor': 'CapacityFactor.csv',
         'availability_factor': 'AvailabilityFactor.csv',
+        'total_annual_max_capacity': 'TotalAnnualMaxCapacity.csv',
+        'total_annual_min_capacity': 'TotalAnnualMinCapacity.csv',
     }
 
     def validate(self, sets: 'OSeMOSYSSets') -> None:
@@ -276,14 +293,6 @@ class PerformanceParameters:
         ValueError
             If references invalid or factors out of bounds.
         """
-        # Validate OperationalLife
-        if not self.operational_life.empty:
-            techs = set(self.operational_life['TECHNOLOGY'].unique())
-            sets.validate_membership(techs, 'technologies', 'in OperationalLife')
-            
-            if (self.operational_life['VALUE'] <= 0).any():
-                raise ValueError("OperationalLife must be positive")
-        
         # Validate InputActivityRatio
         if not self.input_activity_ratio.empty:
             techs = set(self.input_activity_ratio['TECHNOLOGY'].unique())
