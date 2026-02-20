@@ -8,7 +8,7 @@ from .base import ScenarioComponent
 from .topology import TopologyComponent
 from .time import TimeComponent
 from .demand import DemandComponent
-from .supply import SupplyComponent
+from .supply import SupplyComponent, TechnologyBuilder
 from .performance import PerformanceComponent
 from .economics import EconomicsComponent
 
@@ -18,6 +18,7 @@ __all__ = [
     'TimeComponent',
     'DemandComponent',
     'SupplyComponent',
+    'TechnologyBuilder',
     'PerformanceComponent',
     'EconomicsComponent',
 ]

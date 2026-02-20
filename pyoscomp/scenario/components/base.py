@@ -280,6 +280,14 @@ class ScenarioComponent(ABC):
         """Check if a CSV file exists in the scenario directory."""
         return os.path.exists(os.path.join(self.scenario_dir, filename))
 
+    def _save_sorted(self, filename: str, df: pd.DataFrame, cols: List[str], sort_cols: List[str]) -> None:
+        """Helper to save DataFrame with column selection and sorting."""
+        if df.empty:
+            self.write_dataframe(filename, df)
+        else:
+            sorted_df = df[cols].sort_values(by=sort_cols)
+            self.write_dataframe(filename, sorted_df)
+
     # =========================================================================
     # DataFrame Manipulation
     # =========================================================================

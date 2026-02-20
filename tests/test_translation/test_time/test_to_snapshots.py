@@ -109,7 +109,7 @@ def _make_time_scenario_data(years, seasons, daytypes, brackets):
 
 
 # ---------------------------------------------------------------------------
-# Tests – SnapshotResult validation (unchanged, pure unit tests)
+# Tests – SnapshotResult validation (unit tests)
 # ---------------------------------------------------------------------------
 
 class TestSnapshotResultValidation:
@@ -445,7 +445,7 @@ class TestToSnapshotsEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# Tests – apply_to_network (unchanged, tests SnapshotResult directly)
+# Tests – apply_to_network (tests SnapshotResult directly)
 # ---------------------------------------------------------------------------
 
 class TestSnapshotResultApplyToNetwork:

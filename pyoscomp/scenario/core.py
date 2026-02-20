@@ -21,13 +21,12 @@ class Scenario:
     1. TopologyComponent (no prerequisites)
     2. TimeComponent (no prerequisites)
     3. DemandComponent (requires topology + time)
-    4. PerformanceComponent (requires topology + time)
-    5. SupplyComponent (requires topology + time + performance)
+    4. SupplyComponent (requires topology + time)
+    5. PerformanceComponent (requires topology + time + supply on disk)
     6. EconomicsComponent (requires topology + time)
 
-    SupplyComponent's technology definition methods write performance data
-    (activity ratios, capacity factors, etc.) to PerformanceComponent via
-    a back-reference.
+    SupplyComponent defines WHAT technologies exist. PerformanceComponent
+    defines HOW they operate, reading supply registry from disk.
     """
     def __init__(self, scenario_dir: str):
         """
@@ -45,8 +44,8 @@ class Scenario:
         self.topology = TopologyComponent(scenario_dir)
         self.time = TimeComponent(scenario_dir)
         self.demand = DemandComponent(scenario_dir)
+        self.supply = SupplyComponent(scenario_dir)
         self.performance = PerformanceComponent(scenario_dir)
-        self.supply = SupplyComponent(scenario_dir, performance=self.performance)
         self.economics = EconomicsComponent(scenario_dir)
 
     def build(self, return_data: bool = False) -> Optional[ScenarioData]:
@@ -75,20 +74,21 @@ class Scenario:
         self.topology.load()
         self.time.load()
         self.demand.load()
-        self.performance.load()
         self.supply.load()
+        self.performance.load()
         self.economics.load()
 
-        # Process demand, supply (supply.process writes to performance)
+        # Process demand, then supply (saves to disk), then performance
         self.demand.process()
-        self.supply.process()
+        self.supply.save()          # Supply must save first for performance
+        self.performance.process()  # Performance reads supply registry
 
         # Save all components
         self.topology.save()
         self.time.save()
         self.demand.save()
-        self.performance.save()
         self.supply.save()
+        self.performance.save()
         self.economics.save()
 
         # Cross-component reference validation (after all saves)
