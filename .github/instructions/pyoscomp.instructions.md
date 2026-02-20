@@ -28,9 +28,27 @@ This document provides comprehensive guidelines for AI agents and developers wor
 
 PyOSComp is a framework for comparing energy system models, specifically translating between PyPSA and OSeMOSYS formats. The package handles:
 
+- **Scenarios**: (Authoring layer) building and managing model scenarios
+- **Interfaces**: (Data transfer layer) immutable, validated data classes for downstream consumption
 - **Translation**: Bidirectional conversion of model parameters
-- **Scenarios**: Building and managing model scenarios
 - **Input/Output**: Reading and writing model data files
+
+scenario module (mutable)          interfaces module (immutable)
+┌──────────────────────┐           ┌──────────────────────────┐
+│  TopologyComponent   │           │  OSeMOSYSSets            │
+│  TimeComponent       │──build──▶ │  TimeParameters          │
+│  DemandComponent     │  +        │  DemandParameters        │
+│  SupplyComponent     │  to_      │  SupplyParameters        │
+│  PerformanceComponent│  scenario │  PerformanceParameters   │
+│  EconomicsComponent  │  data()   │  EconomicsParameters     │
+└──────────────────────┘           └──────────┬───────────────┘
+                                              │
+                                     ScenarioData (frozen)
+                                              │
+                                   ┌──────────▼───────────────┐
+                                   │  Translators / Runners   │
+                                   │  (PyPSA, OSeMOSYS, etc.) │
+                                   └──────────────────────────┘
 
 ### Core Translation Concept
 
