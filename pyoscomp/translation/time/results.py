@@ -305,7 +305,14 @@ class SnapshotResult:
         - Setting network.snapshots
         - Setting network.snapshot_weightings['objective']
         - Setting network.snapshot_weightings['generators']
+        - Setting network.snapshot_weightings['stores']
         """
         network.set_snapshots(self.snapshots)
-        network.snapshot_weightings['objective'] = self.weightings
-        network.snapshot_weightings['generators'] = self.weightings
+        network.snapshot_weightings = pd.DataFrame(
+            {
+                "objective": self.weightings,
+                "stores": self.weightings,
+                "generators": self.weightings
+            },
+            index=self.snapshots
+        )

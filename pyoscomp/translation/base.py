@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any
-import pandas as pd
+from typing import Any
 
 from ..interfaces import ScenarioData
 

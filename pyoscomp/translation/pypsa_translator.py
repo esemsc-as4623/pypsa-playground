@@ -79,7 +79,8 @@ class PyPSAInputTranslator(InputTranslator):
         self.network.add("Bus", regions)
 
         # 2. Create Snapshots & Weightings (Time)
-        self._setup_time_structure()
+        snapshot_results = self._setup_time_structure()
+        snapshot_results.apply_to_network(self.network)
 
         # 3. Add Loads (Demand)
         self._add_demand()
@@ -102,14 +103,14 @@ class PyPSAInputTranslator(InputTranslator):
         
         if not regions:
             # Fallback for simple single-node models
-            logger.warning("No regions defined, using default 'Region1'")
-            return np.array(["Region1"])
+            logger.warning("No regions defined, using default 'REGION1'")
+            return np.array(["REGION1"])
         
         return np.array(sorted(regions))
     
-    def _setup_time_structure(self) -> None:
+    def _setup_time_structure(self) -> SnapshotResult:
         """
-        Set network snapshots and weightings based on TIMESLICE, YEAR, and YearSplit.
+        Set network snapshots and weightings.
         
         Uses the robust time translation logic from pyoscomp.translation.time module.
         This creates a SnapshotResult and applies it to the network, handling:
@@ -120,54 +121,29 @@ class PyPSAInputTranslator(InputTranslator):
         OSeMOSYS Logic: YearSplit[l,y] = Fraction of year (0 to 1), sum to 1.0
         PyPSA Logic: weighting[t] = Duration in hours, sum to 8760/8784 per year
         """
+        from pyoscomp.translation.time import to_snapshots
 
-        years = sorted(self.scenario_data.sets.years)
-        timeslice_names = sorted(self.scenario_data.sets.timeslices)
-        yearsplit_df = self.scenario_data.time.year_split
-
-        if not years or not timeslice_names:
-            raise ValueError("YEAR and TIMESLICE sets must be non-empty")
+        result = to_snapshots(self.scenario_data)
 
         # 1. Create MultiIndex snapshots (period, timestep)
-        snapshots = pd.MultiIndex.from_product(
-            [years, timeslice_names],
-            names=['period', 'timestep']
-        )
+        snapshots = result.snapshots
 
         # 2. Create weightings from YearSplit (fraction → hours)
-        weightings_dict = {}
-        
-        if yearsplit_df is not None and not yearsplit_df.empty:
-            # Use YearSplit data - handles leap years correctly
-            for _, row in yearsplit_df.iterrows():
-                year = row['YEAR']
-                timeslice = row['TIMESLICE']
-                fraction = row['VALUE']
-                hours = fraction * hours_in_year(year)
-                weightings_dict[(year, timeslice)] = hours
-        else:
-            # Default: equal split for each timeslice
-            logger.warning("No YearSplit data found, using equal split")
-            for year in years:
-                hours_per_ts = hours_in_year(year) / len(timeslice_names)
-                for ts in timeslice_names:
-                    weightings_dict[(year, ts)] = hours_per_ts
-        
-        weightings = pd.Series(weightings_dict)
+        weightings = result.weightings
         weightings = weightings.reindex(snapshots)  # Ensure alignment
 
         # 3. Create SnapshotResult for validation
         snapshot_result = SnapshotResult(
-            years=years,
+            years=self.scenario_data.sets.years,
             snapshots=snapshots,
             weightings=weightings,
-            timeslice_names=timeslice_names
+            timeslice_names=self.scenario_data.sets.timeslices
         )
         
         # 4. Validate coverage (weightings sum to correct hours per year)
         if not snapshot_result.validate_coverage():
             # Log warning but continue - the model may still work
-            for year in years:
+            for year in self.scenario_data.sets.years:
                 year_mask = snapshots.get_level_values('period') == year
                 total_hours = weightings[year_mask].sum()
                 expected = hours_in_year(year)
@@ -177,16 +153,8 @@ class PyPSAInputTranslator(InputTranslator):
                         f"expected {expected:.0f}h (diff={total_hours - expected:.2f}h)"
                     )
 
-        # 5. Apply to network (same as SnapshotResult.apply_to_network)
-        self.network.set_snapshots(snapshots)
-        self.network.snapshot_weightings = pd.DataFrame(
-            {
-                "objective": weightings,
-                "stores": weightings,
-                "generators": weightings
-            },
-            index=self.network.snapshots
-        )
+        # 5. Apply to network
+        snapshot_result.apply_to_network(self.network)
 
     def _add_demand(self) -> None:
         """
