@@ -17,7 +17,7 @@ run : function
 
 Subpackages
 -----------
-scenario : Scenario building components (topology, time, demand, supply, etc.)
+scenario : Scenario building components (topology, time, demand, supply, performance, economics, etc.)
 translation : Translators between OSeMOSYS and PyPSA formats
 interfaces : Data containers and type definitions
 runners : Model execution infrastructure
