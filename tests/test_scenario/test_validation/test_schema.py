@@ -9,7 +9,7 @@ from pyoscomp.scenario.validation.schemas import SchemaRegistry, validate_csv, S
 @pytest.fixture(scope="module")
 def schema():
 	# Load the schema from the package
-	schema_path = importlib.resources.files("pyoscomp").joinpath("osemosys_config.yaml")
+	schema_path = importlib.resources.files("pyoscomp").joinpath("OSeMOSYS_config.yaml")
 	return SchemaRegistry(str(schema_path))
 
 def test_valid_set_csv(schema):

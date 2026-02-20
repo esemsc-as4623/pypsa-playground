@@ -5,7 +5,7 @@ from uuid_extensions import uuid7str
 from .core import Scenario
 
 # Default paths
-DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "osemosys_config.yaml")
+DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "OSeMOSYS_config.yaml")
 DEFAULT_MASTER_LIST_PATH = os.path.join(os.path.dirname(__file__), "..", "scenarios_master_list.csv")
 
 

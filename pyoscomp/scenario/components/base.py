@@ -94,7 +94,7 @@ class ScenarioComponent(ABC):
 
         # Load the schema from the package
         schema_path = importlib.resources.files("pyoscomp").joinpath(
-            "osemosys_config.yaml"
+            "OSeMOSYS_config.yaml"
         )
         self.schema = SchemaRegistry(str(schema_path))
 

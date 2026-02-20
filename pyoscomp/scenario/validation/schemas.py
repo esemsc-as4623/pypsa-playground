@@ -4,12 +4,12 @@
 CSV schema validation for OSeMOSYS input/output files.
 
 This module defines expected columns, types, and constraints for all OSeMOSYS CSVs
-based on the osemosys_config.yaml file. It provides validation functions to check
+based on the OSeMOSYS_config.yaml file. It provides validation functions to check
 DataFrame structure and types on load/save.
 
 Usage:
 	from .schemas import SchemaRegistry, validate_csv
-	schema = SchemaRegistry("path/to/osemosys_config.yaml")
+	schema = SchemaRegistry("path/to/OSeMOSYS_config.yaml")
 	schema.validate_csv("YEAR.csv", df)
 """
 
@@ -24,7 +24,7 @@ class SchemaError(Exception):
 
 class SchemaRegistry:
 	"""
-	Loads and stores OSeMOSYS CSV schema from osemosys_config.yaml.
+	Loads and stores OSeMOSYS CSV schema from OSeMOSYS_config.yaml.
 	Provides methods to retrieve expected columns, types, and constraints.
 	"""
 	def __init__(self, config_path: str):
