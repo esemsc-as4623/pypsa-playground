@@ -46,31 +46,6 @@ To measure the **pure effect of temporal representation**:
 
 ## Prioritized Task List
 
-### Priority -1: Core Integration (BLOCKING - Must Complete First)
-*Goal: Connect Scenario.build() → ScenarioData → Translator → Runner*
-
-**Current Problem:** The `scenario/` module and `translation/` module are disconnected:
-- Scenario components build OSeMOSYS CSVs directly
-- Translators expect `ScenarioData` but have inconsistent implementations
-- `PyPSAInputTranslator` uses both `self.scenario_data` AND `self.input_data` (broken)
-- Runners work independently, not using translators
-
-| ID | Task | Description | Files Affected |
-|----|------|-------------|----------------|
-| **P-1.4** | Create `PyPSARunner.from_scenario_data()` | Accept ScenarioData, use translator internally | `runners/pypsa.py` |
-| **P-1.5** | Create `OSeMOSYSRunner.from_scenario_data()` | Accept ScenarioData, export CSVs, run model | `runners/osemosys.py` |
-| **P-1.6** | Add unified `pyoscomp.run()` function | Entry point: `run(scenario_data, model='both')` | New: `pyoscomp/run.py` |
-| **P-1.7** | Create `simple-demo.ipynb` notebook | Demonstrate full pipeline: build → translate → run → compare | `notebooks/simple-demo.ipynb` |
-| **P-1.8** | Add integration test | Test that same scenario produces equivalent results | `tests/test_integration/test_pipeline.py` |
-
-**Verification:** The demo notebook must show:
-1. Build a scenario using components
-2. Convert to ScenarioData
-3. Translate to PyPSA Network
-4. Translate to OSeMOSYS CSVs
-5. Run both models
-6. Compare results
-
 ### Priority 0: Harmonization Protocol Infrastructure
 *Goal: Build the validation framework to PROVE models are harmonized*
 
