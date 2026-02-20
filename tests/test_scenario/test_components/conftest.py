@@ -18,6 +18,7 @@ import pandas as pd
 
 from pyoscomp.scenario.components.topology import TopologyComponent
 from pyoscomp.scenario.components.time import TimeComponent
+from pyoscomp.scenario.components.supply import SupplyComponent
 
 
 # =============================================================================
@@ -137,6 +138,30 @@ def complete_scenario_dir(tmp_path):
     time.save()
 
     return str(scenario_dir)
+
+
+@pytest.fixture
+def supply_scenario_dir(complete_scenario_dir):
+    """
+    Complete scenario with supply component saved to disk.
+
+    Includes a GAS_CCGT conversion technology and a SOLAR_PV resource,
+    with TECHNOLOGY.csv, FUEL.csv, MODE_OF_OPERATION.csv,
+    OperationalLife.csv, ResidualCapacity.csv, and
+    _fuel_assignments.json all written to disk.
+
+    This is the minimum prerequisite for PerformanceComponent tests
+    that need to read the supply registry from disk.
+    """
+    supply = SupplyComponent(complete_scenario_dir)
+    supply.add_technology('REGION1', 'GAS_CCGT') \
+        .with_operational_life(30) \
+        .as_conversion(input_fuel='GAS', output_fuel='ELEC')
+    supply.add_technology('REGION1', 'SOLAR_PV') \
+        .with_operational_life(25) \
+        .as_resource(output_fuel='ELEC')
+    supply.save()
+    return complete_scenario_dir
 
 
 # =============================================================================

@@ -1,30 +1,29 @@
 # tests/test_scenario/test_components/test_supply.py
 
 """
-Tests for SupplyComponent.
+Tests for SupplyComponent (refactored).
 
 Tests cover:
 - Initialization and prerequisites
-- Properties (technologies, fuels, modes)
-- add_technology method
-- set_conversion_technology (efficiency modeling)
-- set_resource_technology (renewables)
-- set_multimode_technology (CHP, storage)
-- set_residual_capacity with interpolation
-- set_capacity_factor (timeslice/hierarchical weights)
-- set_availability_factor
-- process method
-- Activity ratio validation
-- load / save operations
+- Properties (technologies, fuels, modes, fuel_assignments)
+- TechnologyBuilder fluent API
+  * with_operational_life
+  * with_residual_capacity (step and linear interpolation)
+  * as_conversion
+  * as_resource
+  * as_multimode
+- Validation
+- Load / save operations (including _fuel_assignments.json)
+- Representation (__repr__)
 """
 
+import json
 import math
 import os
 import pytest
 import pandas as pd
 
 from pyoscomp.scenario.components.supply import SupplyComponent
-from pyoscomp.scenario.components.performance import PerformanceComponent
 
 
 # =============================================================================
@@ -32,19 +31,19 @@ from pyoscomp.scenario.components.performance import PerformanceComponent
 # =============================================================================
 
 @pytest.fixture
-def supply_component(complete_scenario_dir):
+def supply(complete_scenario_dir):
     """Create SupplyComponent with all prerequisites."""
-    perf = PerformanceComponent(complete_scenario_dir)
-    return SupplyComponent(complete_scenario_dir, performance=perf)
+    return SupplyComponent(complete_scenario_dir)
 
 
 @pytest.fixture
 def supply_with_tech(complete_scenario_dir):
-    """Supply component with a registered technology."""
-    perf = PerformanceComponent(complete_scenario_dir)
-    supply = SupplyComponent(complete_scenario_dir, performance=perf)
-    supply.add_technology('REGION1', 'GAS_CCGT', operational_life=30)
-    return supply
+    """Supply component with a registered conversion technology."""
+    s = SupplyComponent(complete_scenario_dir)
+    s.add_technology('REGION1', 'GAS_CCGT') \
+        .with_operational_life(30) \
+        .as_conversion(input_fuel='GAS', output_fuel='ELEC')
+    return s
 
 
 # =============================================================================
@@ -54,11 +53,12 @@ def supply_with_tech(complete_scenario_dir):
 class TestSupplyInit:
     """Test SupplyComponent initialization."""
 
-    def test_init_loads_prerequisites(self, supply_component):
-        """Initialization loads years, regions, timeslices."""
-        assert supply_component.years is not None
-        assert supply_component.regions is not None
-        assert supply_component.timeslices is not None
+    def test_init_loads_prerequisites(self, supply):
+        """Initialization loads years and regions."""
+        assert supply.years is not None
+        assert len(supply.years) > 0
+        assert supply.regions is not None
+        assert 'REGION1' in supply.regions
 
     def test_init_missing_time_raises(self, topology_scenario_dir):
         """Missing time component raises AttributeError."""
@@ -67,11 +67,11 @@ class TestSupplyInit:
 
     def test_owned_files(self):
         """owned_files contains supply-related files."""
-        expected = [
+        expected = {
             'TECHNOLOGY.csv', 'FUEL.csv', 'MODE_OF_OPERATION.csv',
-            'ResidualCapacity.csv'
-        ]
-        assert set(SupplyComponent.owned_files) == set(expected)
+            'OperationalLife.csv', 'ResidualCapacity.csv',
+        }
+        assert set(SupplyComponent.owned_files) == expected
 
 
 # =============================================================================
@@ -81,419 +81,197 @@ class TestSupplyInit:
 class TestSupplyProperties:
     """Test supply properties."""
 
-    def test_technologies_empty(self, supply_component):
+    def test_technologies_empty(self, supply):
         """technologies empty initially."""
-        assert supply_component.technologies == []
+        assert supply.technologies == []
 
     def test_technologies_after_add(self, supply_with_tech):
         """technologies populated after add_technology."""
         assert 'GAS_CCGT' in supply_with_tech.technologies
 
-    def test_fuels_empty(self, supply_component):
+    def test_fuels_empty(self, supply):
         """fuels empty initially."""
-        assert supply_component.fuels == []
+        assert supply.fuels == []
 
     def test_fuels_after_conversion(self, supply_with_tech):
-        """fuels populated after set_conversion_technology."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='GAS', output_fuel='ELEC',
-            efficiency=0.5
-        )
+        """fuels populated after as_conversion."""
         assert 'GAS' in supply_with_tech.fuels
         assert 'ELEC' in supply_with_tech.fuels
 
-    def test_modes_default(self, supply_with_tech):
-        """modes returns default MODE1 initially."""
-        assert supply_with_tech.modes == {'MODE1'}
+    def test_modes_default(self, supply):
+        """modes returns default MODE1 when nothing defined."""
+        assert supply.modes == {'MODE1'}
+
+    def test_modes_after_conversion(self, supply_with_tech):
+        """modes contains MODE1 after as_conversion."""
+        assert 'MODE1' in supply_with_tech.modes
+
+    def test_fuel_assignments(self, supply_with_tech):
+        """fuel_assignments tracks conversion mappings."""
+        fa = supply_with_tech.fuel_assignments
+        key = ('REGION1', 'GAS_CCGT', 'MODE1')
+        assert key in fa
+        assert fa[key] == {'input': 'GAS', 'output': 'ELEC'}
 
 
 # =============================================================================
-# add_technology Tests
+# TechnologyBuilder Tests
 # =============================================================================
 
-class TestAddTechnology:
-    """Test add_technology method."""
+class TestTechnologyBuilder:
+    """Test fluent TechnologyBuilder API."""
 
-    def test_add_technology_basic(self, supply_component):
-        """Add technology with basic parameters."""
-        supply_component.add_technology(
-            'REGION1', 'SOLAR_PV',
-            operational_life=25
-        )
+    def test_add_technology_returns_builder(self, supply):
+        """add_technology returns a TechnologyBuilder."""
+        from pyoscomp.scenario.components.supply import TechnologyBuilder
+        builder = supply.add_technology('REGION1', 'WIND')
+        assert isinstance(builder, TechnologyBuilder)
 
-        assert ('REGION1', 'SOLAR_PV') in supply_component.defined_tech
-        assert 'SOLAR_PV' in supply_component.technologies
+    def test_builder_chaining(self, supply):
+        """Builder methods return self for chaining."""
+        result = supply.add_technology('REGION1', 'GAS_CCGT') \
+            .with_operational_life(30) \
+            .with_residual_capacity(0) \
+            .as_conversion(input_fuel='GAS', output_fuel='ELEC')
 
-    def test_add_technology_custom_cau(self, supply_component):
-        """Add technology with custom capacity_to_activity_unit."""
-        supply_component.add_technology(
-            'REGION1', 'WIND',
-            operational_life=25,
-            capacity_to_activity_unit=8760
-        )
+        from pyoscomp.scenario.components.supply import TechnologyBuilder
+        assert isinstance(result, TechnologyBuilder)
 
-        df = supply_component._perf.capacity_to_activity_unit
-        row = df[(df['TECHNOLOGY'] == 'WIND')]
-        assert row['VALUE'].iloc[0] == 8760
-
-    def test_add_technology_invalid_region_raises(self, supply_component):
+    def test_invalid_region_raises(self, supply):
         """Invalid region raises ValueError."""
         with pytest.raises(ValueError, match="not defined"):
-            supply_component.add_technology(
-                'INVALID', 'TECH1', operational_life=20
-            )
+            supply.add_technology('INVALID', 'TECH1')
 
-    def test_add_technology_zero_life_raises(self, supply_component):
+    def test_with_operational_life_scalar(self, supply):
+        """with_operational_life stores operational life."""
+        supply.add_technology('REGION1', 'WIND') \
+            .with_operational_life(25)
+
+        df = supply.operational_life
+        row = df[df['TECHNOLOGY'] == 'WIND']
+        assert len(row) == 1
+        assert row['VALUE'].iloc[0] == 25
+
+    def test_with_operational_life_zero_raises(self, supply):
         """Zero operational life raises ValueError."""
         with pytest.raises(ValueError, match="positive"):
-            supply_component.add_technology(
-                'REGION1', 'TECH1', operational_life=0
-            )
+            supply.add_technology('REGION1', 'WIND') \
+                .with_operational_life(0)
 
-    def test_add_technology_negative_life_raises(self, supply_component):
+    def test_with_operational_life_negative_raises(self, supply):
         """Negative operational life raises ValueError."""
         with pytest.raises(ValueError, match="positive"):
-            supply_component.add_technology(
-                'REGION1', 'TECH1', operational_life=-5
-            )
+            supply.add_technology('REGION1', 'WIND') \
+                .with_operational_life(-5)
 
-    def test_operational_life_stored(self, supply_with_tech):
-        """OperationalLife stored correctly."""
-        df = supply_with_tech._perf.operational_life
-        row = df[df['TECHNOLOGY'] == 'GAS_CCGT']
-        assert row['VALUE'].iloc[0] == 30
+    def test_with_residual_capacity_scalar(self, supply):
+        """with_residual_capacity scalar fills all years."""
+        supply.add_technology('REGION1', 'WIND') \
+            .with_residual_capacity(10)
 
+        df = supply.residual_capacity
+        wind_rows = df[df['TECHNOLOGY'] == 'WIND']
+        assert len(wind_rows) == len(supply.years)
+        assert (wind_rows['VALUE'] == 10).all()
 
-# =============================================================================
-# set_conversion_technology Tests
-# =============================================================================
+    def test_with_residual_capacity_dict(self, supply):
+        """with_residual_capacity with dict trajectory."""
+        supply.add_technology('REGION1', 'GAS') \
+            .with_residual_capacity({2025: 10, 2030: 5})
 
-class TestSetConversionTechnology:
-    """Test set_conversion_technology method."""
+        df = supply.residual_capacity
+        gas_rows = df[df['TECHNOLOGY'] == 'GAS']
+        assert len(gas_rows) == len(supply.years)
 
-    def test_basic_conversion(self, supply_with_tech):
-        """Set basic conversion technology."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='NATURAL_GAS',
-            output_fuel='ELECTRICITY',
-            efficiency=0.55
-        )
+    def test_with_residual_capacity_negative_raises(self, supply):
+        """Negative residual capacity raises ValueError."""
+        with pytest.raises(ValueError, match="Negative"):
+            supply.add_technology('REGION1', 'GAS') \
+                .with_residual_capacity(-1)
 
-        # Check input activity ratio
-        inp = supply_with_tech._perf.input_activity_ratio
-        assert len(inp) > 0
-        row = inp[inp['TECHNOLOGY'] == 'GAS_CCGT'].iloc[0]
-        # Input ratio = 1/efficiency = 1/0.55 ≈ 1.818
-        assert math.isclose(row['VALUE'], 1.0 / 0.55, rel_tol=0.01)
+    def test_as_conversion_basic(self, supply):
+        """as_conversion registers fuels and mode."""
+        supply.add_technology('REGION1', 'GAS_CCGT') \
+            .as_conversion(input_fuel='GAS', output_fuel='ELEC')
 
-        # Check output activity ratio
-        out = supply_with_tech._perf.output_activity_ratio
-        row = out[out['TECHNOLOGY'] == 'GAS_CCGT'].iloc[0]
-        assert row['VALUE'] == 1.0
+        assert 'GAS' in supply.fuels
+        assert 'ELEC' in supply.fuels
+        assert 'MODE1' in supply.modes
 
-    def test_efficiency_trajectory(self, supply_with_tech):
-        """Set efficiency trajectory over years."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='GAS', output_fuel='ELEC',
-            efficiency={2025: 0.50, 2030: 0.55}
-        )
-
-        inp = supply_with_tech._perf.input_activity_ratio
-        # Check both values present
-        val_2025 = inp[(inp['TECHNOLOGY'] == 'GAS_CCGT') &
-                       (inp['YEAR'] == 2025)]['VALUE'].iloc[0]
-        val_2030 = inp[(inp['TECHNOLOGY'] == 'GAS_CCGT') &
-                       (inp['YEAR'] == 2030)]['VALUE'].iloc[0]
-
-        assert math.isclose(val_2025, 1.0 / 0.50, rel_tol=0.01)
-        assert math.isclose(val_2030, 1.0 / 0.55, rel_tol=0.01)
-
-    def test_efficiency_zero_raises(self, supply_with_tech):
-        """Zero efficiency raises ValueError."""
-        with pytest.raises(ValueError, match="Efficiency"):
-            supply_with_tech.set_conversion_technology(
-                'REGION1', 'GAS_CCGT',
-                input_fuel='GAS', output_fuel='ELEC',
-                efficiency=0.0
-            )
-
-    def test_efficiency_over_one_raises(self, supply_with_tech):
-        """Efficiency > 1 raises ValueError."""
-        with pytest.raises(ValueError, match="Efficiency"):
-            supply_with_tech.set_conversion_technology(
-                'REGION1', 'GAS_CCGT',
-                input_fuel='GAS', output_fuel='ELEC',
-                efficiency=1.1
-            )
-
-    def test_same_input_output_raises(self, supply_with_tech):
+    def test_as_conversion_same_fuel_raises(self, supply):
         """Same input and output fuel raises ValueError."""
         with pytest.raises(ValueError, match="different"):
-            supply_with_tech.set_conversion_technology(
-                'REGION1', 'GAS_CCGT',
-                input_fuel='ELEC', output_fuel='ELEC',
-                efficiency=0.9
-            )
+            supply.add_technology('REGION1', 'TECH') \
+                .as_conversion(input_fuel='ELEC', output_fuel='ELEC')
 
-    def test_unregistered_tech_raises(self, supply_component):
-        """Setting conversion on unregistered tech raises ValueError."""
-        with pytest.raises(ValueError, match="not registered"):
-            supply_component.set_conversion_technology(
-                'REGION1', 'UNKNOWN_TECH',
-                input_fuel='GAS', output_fuel='ELEC',
-                efficiency=0.5
-            )
+    def test_as_resource(self, supply):
+        """as_resource registers output fuel only."""
+        supply.add_technology('REGION1', 'SOLAR_PV') \
+            .as_resource(output_fuel='ELEC')
 
+        assert 'ELEC' in supply.fuels
+        fa = supply.fuel_assignments
+        key = ('REGION1', 'SOLAR_PV', 'MODE1')
+        assert fa[key]['output'] == 'ELEC'
+        assert fa[key]['input'] is None
 
-# =============================================================================
-# set_resource_technology Tests
-# =============================================================================
+    def test_as_multimode(self, supply):
+        """as_multimode registers multiple modes and fuels."""
+        supply.add_technology('REGION1', 'CHP') \
+            .as_multimode({
+                'ELEC_ONLY': {
+                    'inputs': {'GAS': 1.0},
+                    'outputs': {'ELEC': 1.0},
+                },
+                'CHP_MODE': {
+                    'inputs': {'GAS': 1.0},
+                    'outputs': {'ELEC': 0.6, 'HEAT': 0.3},
+                },
+            })
 
-class TestSetResourceTechnology:
-    """Test set_resource_technology method."""
+        assert 'ELEC_ONLY' in supply.modes
+        assert 'CHP_MODE' in supply.modes
+        assert {'GAS', 'ELEC', 'HEAT'}.issubset(set(supply.fuels))
 
-    def test_resource_technology(self, supply_component):
-        """Set resource/extraction technology."""
-        supply_component.add_technology('REGION1', 'SOLAR_PV', operational_life=25)
-        supply_component.set_resource_technology(
-            'REGION1', 'SOLAR_PV', output_fuel='ELECTRICITY'
-        )
-
-        # Should have output only (no input)
-        assert supply_component._perf.input_activity_ratio.empty or \
-               'SOLAR_PV' not in supply_component._perf.input_activity_ratio['TECHNOLOGY'].values
-
-        out = supply_component._perf.output_activity_ratio
-        row = out[out['TECHNOLOGY'] == 'SOLAR_PV'].iloc[0]
-        assert row['VALUE'] == 1.0
-        assert row['FUEL'] == 'ELECTRICITY'
-
-    def test_resource_fuels_tracked(self, supply_component):
-        """Resource technology fuel is tracked."""
-        supply_component.add_technology('REGION1', 'WIND', operational_life=25)
-        supply_component.set_resource_technology('REGION1', 'WIND', 'ELEC')
-
-        assert 'ELEC' in supply_component.fuels
-
-
-# =============================================================================
-# set_multimode_technology Tests
-# =============================================================================
-
-class TestSetMultimodeTechnology:
-    """Test set_multimode_technology method."""
-
-    def test_multimode_basic(self, supply_component):
-        """Set multimode technology (CHP example)."""
-        supply_component.add_technology('REGION1', 'CHP', operational_life=30)
-        supply_component.set_multimode_technology('REGION1', 'CHP', {
-            'ELEC_ONLY': {
-                'inputs': {'GAS': 1.8},
-                'outputs': {'ELEC': 1.0}
-            },
-            'CHP_MODE': {
-                'inputs': {'GAS': 1.5},
-                'outputs': {'ELEC': 0.6, 'HEAT': 0.3}
-            }
-        })
-
-        # Check modes registered
-        assert 'ELEC_ONLY' in supply_component.modes
-        assert 'CHP_MODE' in supply_component.modes
-
-        # Check all fuels tracked
-        assert {'GAS', 'ELEC', 'HEAT'}.issubset(set(supply_component.fuels))
-
-    def test_multimode_missing_output_raises(self, supply_component):
+    def test_as_multimode_missing_output_raises(self, supply):
         """Mode without outputs raises ValueError."""
-        supply_component.add_technology('REGION1', 'CHP', operational_life=30)
-
         with pytest.raises(ValueError, match="at least one output"):
-            supply_component.set_multimode_technology('REGION1', 'CHP', {
-                'BAD_MODE': {'inputs': {'GAS': 1.0}}  # No outputs
-            })
-
-    def test_multimode_zero_ratio_raises(self, supply_component):
-        """Zero ratio in mode config raises ValueError."""
-        supply_component.add_technology('REGION1', 'CHP', operational_life=30)
-
-        with pytest.raises(ValueError, match="positive"):
-            supply_component.set_multimode_technology('REGION1', 'CHP', {
-                'BAD_MODE': {'outputs': {'ELEC': 0}}  # Zero ratio
-            })
+            supply.add_technology('REGION1', 'CHP') \
+                .as_multimode({
+                    'BAD_MODE': {'inputs': {'GAS': 1.0}},
+                })
 
 
 # =============================================================================
-# set_residual_capacity Tests
+# Residual Capacity Interpolation Tests
 # =============================================================================
 
-class TestSetResidualCapacity:
-    """Test set_residual_capacity method."""
+class TestResidualCapacity:
+    """Test residual capacity with interpolation."""
 
-    def test_residual_capacity_step(self, supply_with_tech):
-        """Set residual capacity with step interpolation."""
-        supply_with_tech.set_residual_capacity(
-            'REGION1', 'GAS_CCGT',
-            trajectory={2025: 10, 2030: 5},
-            interpolation='step'
-        )
+    def test_residual_step(self, supply):
+        """Step interpolation keeps constant until next point."""
+        supply.add_technology('REGION1', 'GAS') \
+            .with_residual_capacity(
+                {2025: 10, 2030: 5}, interpolation='step'
+            )
 
-        df = supply_with_tech.residual_capacity
-        # 2025-2029 should be 10, 2030 should be 5
+        df = supply.residual_capacity
         val_2027 = df[df['YEAR'] == 2027]['VALUE'].iloc[0]
         val_2030 = df[df['YEAR'] == 2030]['VALUE'].iloc[0]
-
         assert val_2027 == 10
         assert val_2030 == 5
 
-    def test_residual_capacity_linear(self, supply_with_tech):
-        """Set residual capacity with linear interpolation."""
-        supply_with_tech.set_residual_capacity(
-            'REGION1', 'GAS_CCGT',
-            trajectory={2025: 10, 2030: 0},
-            interpolation='linear'
-        )
+    def test_residual_linear(self, supply):
+        """Linear interpolation between defined points."""
+        supply.add_technology('REGION1', 'GAS') \
+            .with_residual_capacity(
+                {2025: 10, 2030: 0}, interpolation='linear'
+            )
 
-        df = supply_with_tech.residual_capacity
-        # Linear: 10, 8, 6, 4, 2, 0
+        df = supply.residual_capacity
         val_2027 = df[df['YEAR'] == 2027]['VALUE'].iloc[0]
         assert math.isclose(val_2027, 6, abs_tol=0.5)
-
-    def test_residual_capacity_empty_raises(self, supply_with_tech):
-        """Empty trajectory raises ValueError."""
-        with pytest.raises(ValueError, match="Empty"):
-            supply_with_tech.set_residual_capacity(
-                'REGION1', 'GAS_CCGT', trajectory={}
-            )
-
-    def test_residual_capacity_negative_raises(self, supply_with_tech):
-        """Negative capacity raises ValueError."""
-        with pytest.raises(ValueError, match="Negative"):
-            supply_with_tech.set_residual_capacity(
-                'REGION1', 'GAS_CCGT',
-                trajectory={2025: -10}
-            )
-
-
-# =============================================================================
-# set_capacity_factor Tests
-# =============================================================================
-
-class TestSetCapacityFactor:
-    """Test set_capacity_factor method."""
-
-    def test_capacity_factor_timeslice_weights(self, supply_with_tech):
-        """Set capacity factor with timeslice weights."""
-        ts = supply_with_tech.timeslices
-        weights = {ts[0]: 0.8, ts[1]: 0.5}
-
-        supply_with_tech.set_capacity_factor(
-            'REGION1', 'GAS_CCGT',
-            timeslice_weights=weights
-        )
-
-        # Check assignment stored
-        assert len(supply_with_tech._capacity_factor_assignments) > 0
-
-    def test_capacity_factor_hierarchical(self, supply_with_tech):
-        """Set capacity factor with hierarchical weights."""
-        supply_with_tech.set_capacity_factor(
-            'REGION1', 'GAS_CCGT',
-            bracket_weights={'Day': 1.0, 'Night': 0.0}
-        )
-
-        # Check assignment stored
-        assert len(supply_with_tech._capacity_factor_assignments) > 0
-
-    def test_capacity_factor_clamped(self, supply_with_tech):
-        """Capacity factors clamped to [0, 1]."""
-        with pytest.raises(ValueError, match="validation failed"):
-            supply_with_tech.set_capacity_factor(
-                'REGION1', 'GAS_CCGT',
-                timeslice_weights={supply_with_tech.timeslices[0]: 1.5}  # > 1
-            )
-            supply_with_tech.process()
-
-
-# =============================================================================
-# set_availability_factor Tests
-# =============================================================================
-
-class TestSetAvailabilityFactor:
-    """Test set_availability_factor method."""
-
-    def test_availability_factor_scalar(self, supply_with_tech):
-        """Set availability factor as scalar."""
-        supply_with_tech.set_availability_factor(
-            'REGION1', 'GAS_CCGT', availability=0.9
-        )
-
-        df = supply_with_tech._perf.availability_factor
-        assert (df['VALUE'] == 0.9).all()
-
-    def test_availability_factor_dict(self, supply_with_tech):
-        """Set availability factor as year dict."""
-        supply_with_tech.set_availability_factor(
-            'REGION1', 'GAS_CCGT',
-            availability={2025: 0.95, 2030: 0.90}
-        )
-
-        df = supply_with_tech._perf.availability_factor
-        val_2025 = df[df['YEAR'] == 2025]['VALUE'].iloc[0]
-        val_2030 = df[df['YEAR'] == 2030]['VALUE'].iloc[0]
-
-        assert val_2025 == 0.95
-        assert val_2030 == 0.90
-
-    def test_availability_factor_out_of_range_raises(self, supply_with_tech):
-        """Availability outside [0, 1] raises ValueError."""
-        with pytest.raises(ValueError, match="\\[0, 1\\]"):
-            supply_with_tech.set_availability_factor(
-                'REGION1', 'GAS_CCGT', availability=1.5
-            )
-
-
-# =============================================================================
-# process Tests
-# =============================================================================
-
-class TestProcess:
-    """Test process method."""
-
-    def test_process_generates_capacity_factors(self, supply_with_tech):
-        """process generates capacity factor DataFrame."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='GAS', output_fuel='ELEC',
-            efficiency=0.5
-        )
-        supply_with_tech.process()
-
-        assert not supply_with_tech._perf.capacity_factor.empty
-
-    def test_process_default_capacity_factor(self, supply_with_tech):
-        """Default capacity factor is 1.0."""
-        supply_with_tech.set_resource_technology(
-            'REGION1', 'GAS_CCGT', output_fuel='ELEC'
-        )
-        supply_with_tech.process()
-
-        df = supply_with_tech._perf.capacity_factor
-        # All values should be 1.0 (default)
-        assert (df['VALUE'] == 1.0).all()
-
-    def test_process_default_availability_factor(self, supply_with_tech):
-        """Default availability factor is 1.0."""
-        supply_with_tech.set_resource_technology(
-            'REGION1', 'GAS_CCGT', output_fuel='ELEC'
-        )
-        supply_with_tech.process()
-
-        df = supply_with_tech._perf.availability_factor
-        assert (df['VALUE'] == 1.0).all()
 
 
 # =============================================================================
@@ -501,96 +279,78 @@ class TestProcess:
 # =============================================================================
 
 class TestSupplyValidation:
-    """Test validate method and activity ratio validation."""
+    """Test validate method."""
 
     def test_validate_success(self, supply_with_tech):
         """Valid supply passes validation."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='GAS', output_fuel='ELEC',
-            efficiency=0.5
-        )
-
-        # Should not raise
         supply_with_tech.validate()
 
-    def test_validate_no_output_raises(self, supply_with_tech):
-        """Technology without outputs fails validation."""
-        # Technology registered but no conversion set
-
-        with pytest.raises(ValueError, match="Activity ratio validation failed"):
-            supply_with_tech.validate()
+    def test_validate_missing_operational_life_raises(self, supply):
+        """Technology without operational life fails validation."""
+        supply.add_technology('REGION1', 'TECH1')
+        # No with_operational_life call
+        with pytest.raises(ValueError, match="no operational life"):
+            supply.validate()
 
 
 # =============================================================================
-# Load / Save Tests
+# Save / Load Tests
 # =============================================================================
 
-class TestSupplyLoadSave:
-    """Test load and save operations."""
+class TestSupplySaveLoad:
+    """Test save and load operations."""
 
     def test_save_creates_files(self, supply_with_tech):
         """save creates all owned CSV files."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='GAS', output_fuel='ELEC',
-            efficiency=0.5
-        )
-        supply_with_tech.process()
         supply_with_tech.save()
 
         for filename in SupplyComponent.owned_files:
-            path = os.path.join(supply_with_tech.scenario_dir, filename)
+            path = os.path.join(
+                supply_with_tech.scenario_dir, filename
+            )
             assert os.path.exists(path), f"Missing: {filename}"
 
-    def test_save_technology_csv(self, supply_with_tech):
-        """TECHNOLOGY.csv generated from defined technologies."""
-        supply_with_tech.set_resource_technology(
-            'REGION1', 'GAS_CCGT', output_fuel='ELEC'
-        )
+    def test_save_creates_fuel_assignments_json(self, supply_with_tech):
+        """save creates _fuel_assignments.json sidecar."""
         supply_with_tech.save()
+        fa_path = os.path.join(
+            supply_with_tech.scenario_dir, "_fuel_assignments.json"
+        )
+        assert os.path.exists(fa_path)
 
+        with open(fa_path) as f:
+            data = json.load(f)
+        assert 'REGION1|GAS_CCGT|MODE1' in data
+
+    def test_save_technology_csv(self, supply_with_tech):
+        """TECHNOLOGY.csv matches defined technologies."""
+        supply_with_tech.save()
         df = pd.read_csv(
-            os.path.join(supply_with_tech.scenario_dir, 'TECHNOLOGY.csv')
+            os.path.join(
+                supply_with_tech.scenario_dir, 'TECHNOLOGY.csv'
+            )
         )
         assert 'GAS_CCGT' in df['VALUE'].values
 
     def test_save_fuel_csv(self, supply_with_tech):
-        """FUEL.csv generated from defined fuels."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='NATURAL_GAS', output_fuel='ELECTRICITY',
-            efficiency=0.5
-        )
+        """FUEL.csv matches defined fuels."""
         supply_with_tech.save()
-
         df = pd.read_csv(
-            os.path.join(supply_with_tech.scenario_dir, 'FUEL.csv')
+            os.path.join(
+                supply_with_tech.scenario_dir, 'FUEL.csv'
+            )
         )
-        assert 'NATURAL_GAS' in df['VALUE'].values
-        assert 'ELECTRICITY' in df['VALUE'].values
+        assert 'GAS' in df['VALUE'].values
+        assert 'ELEC' in df['VALUE'].values
 
     def test_round_trip(self, supply_with_tech):
         """Save and load preserves data."""
-        supply_with_tech.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='GAS', output_fuel='ELEC',
-            efficiency=0.55
-        )
-        supply_with_tech.process()
         supply_with_tech.save()
-        supply_with_tech._perf.save()
 
-        # Load in new instance
-        perf_loaded = PerformanceComponent(supply_with_tech.scenario_dir)
-        perf_loaded.load()
-        loaded = SupplyComponent(supply_with_tech.scenario_dir, performance=perf_loaded)
+        loaded = SupplyComponent(supply_with_tech.scenario_dir)
         loaded.load()
 
-        # Verify technologies
         assert 'GAS_CCGT' in loaded.technologies
-
-        # Verify fuels
         assert set(loaded.fuels) == {'GAS', 'ELEC'}
 
 
@@ -602,90 +362,53 @@ class TestSupplyIntegration:
     """Integration tests for supply component."""
 
     def test_full_workflow(self, complete_scenario_dir):
-        """Complete workflow: add technologies, set parameters, process, save."""
-        perf = PerformanceComponent(complete_scenario_dir)
-        supply = SupplyComponent(complete_scenario_dir, performance=perf)
+        """Add technologies, set parameters, validate, save."""
+        supply = SupplyComponent(complete_scenario_dir)
 
-        # Add technologies
-        supply.add_technology('REGION1', 'GAS_CCGT', operational_life=30)
-        supply.add_technology('REGION1', 'SOLAR_PV', operational_life=25)
-        supply.add_technology('REGION1', 'WIND', operational_life=25)
+        supply.add_technology('REGION1', 'GAS_CCGT') \
+            .with_operational_life(30) \
+            .with_residual_capacity(
+                {2025: 5, 2030: 3}, interpolation='linear'
+            ) \
+            .as_conversion(input_fuel='GAS', output_fuel='ELEC')
 
-        # Set conversions
-        supply.set_conversion_technology(
-            'REGION1', 'GAS_CCGT',
-            input_fuel='GAS', output_fuel='ELEC',
-            efficiency=0.55
-        )
-        supply.set_resource_technology('REGION1', 'SOLAR_PV', 'ELEC')
-        supply.set_resource_technology('REGION1', 'WIND', 'ELEC')
+        supply.add_technology('REGION1', 'SOLAR_PV') \
+            .with_operational_life(25) \
+            .as_resource(output_fuel='ELEC')
 
-        # Set capacity factors for renewables
-        supply.set_capacity_factor(
-            'REGION1', 'SOLAR_PV',
-            bracket_weights={'Day': 0.4, 'Night': 0.0}
-        )
-        supply.set_capacity_factor(
-            'REGION1', 'WIND',
-            bracket_weights={'Day': 0.3, 'Night': 0.35}
-        )
+        supply.add_technology('REGION1', 'WIND') \
+            .with_operational_life(25) \
+            .as_resource(output_fuel='ELEC')
 
-        # Set residual capacity for existing plant
-        supply.set_residual_capacity(
-            'REGION1', 'GAS_CCGT',
-            trajectory={2025: 5, 2030: 3},
-            interpolation='linear'
-        )
-
-        # Process and validate
-        supply.process()
         supply.validate()
-
-        # Save
         supply.save()
-        perf.save()
 
-        # Verify files created
+        # Verify written files
         assert os.path.exists(
             os.path.join(complete_scenario_dir, 'TECHNOLOGY.csv')
         )
-        assert os.path.exists(
-            os.path.join(complete_scenario_dir, 'CapacityFactor.csv')
+        df = pd.read_csv(
+            os.path.join(complete_scenario_dir, 'TECHNOLOGY.csv')
         )
+        assert set(df['VALUE']) == {'GAS_CCGT', 'SOLAR_PV', 'WIND'}
 
     def test_multiple_technologies(self, complete_scenario_dir):
         """Multiple technologies with different characteristics."""
-        perf = PerformanceComponent(complete_scenario_dir)
-        supply = SupplyComponent(complete_scenario_dir, performance=perf)
+        supply = SupplyComponent(complete_scenario_dir)
 
-        # Thermal
-        supply.add_technology('REGION1', 'COAL', operational_life=40)
-        supply.set_conversion_technology(
-            'REGION1', 'COAL',
-            input_fuel='COAL', output_fuel='ELEC',
-            efficiency=0.35
-        )
+        supply.add_technology('REGION1', 'COAL') \
+            .with_operational_life(40) \
+            .as_conversion(input_fuel='COAL', output_fuel='ELEC')
 
-        # Nuclear
-        supply.add_technology('REGION1', 'NUCLEAR', operational_life=60)
-        supply.set_conversion_technology(
-            'REGION1', 'NUCLEAR',
-            input_fuel='URANIUM', output_fuel='ELEC',
-            efficiency=0.33
-        )
-        supply.set_availability_factor('REGION1', 'NUCLEAR', 0.90)
+        supply.add_technology('REGION1', 'NUCLEAR') \
+            .with_operational_life(60) \
+            .as_conversion(input_fuel='URANIUM', output_fuel='ELEC')
 
-        # Renewable
-        supply.add_technology('REGION1', 'HYDRO', operational_life=80)
-        supply.set_resource_technology('REGION1', 'HYDRO', 'ELEC')
+        supply.add_technology('REGION1', 'HYDRO') \
+            .with_operational_life(80) \
+            .as_resource(output_fuel='ELEC')
 
-        supply.process()
-        supply.validate()
-
-        # Check all technologies present
         assert set(supply.technologies) == {'COAL', 'NUCLEAR', 'HYDRO'}
-
-        # Check fuels collected
         assert {'COAL', 'URANIUM', 'ELEC'}.issubset(set(supply.fuels))
 
     def test_repr(self, supply_with_tech):

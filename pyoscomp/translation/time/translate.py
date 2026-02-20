@@ -7,7 +7,7 @@ from typing import List, Set, Dict, Union, Tuple
 from ...constants import ENDOFDAY, hours_in_year
 from .structures import DayType, DailyTimeBracket, Timeslice
 from .results import TimesliceResult, SnapshotResult
-from ...scenario.components.time import TimeComponent
+from ...interfaces.containers import ScenarioData
 
 
 def create_timebrackets_from_times(times: List[time]) -> Set[DailyTimeBracket]:
@@ -638,7 +638,7 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
 
     return result
 
-def to_snapshots(source: Union[TimeComponent, str],
+def to_snapshots(source: ScenarioData,
                  multi_investment_periods: bool = True) -> SnapshotResult:
     """
     Convert OSeMOSYS hierarchical timeslice structure to PyPSA snapshots.
@@ -649,15 +649,12 @@ def to_snapshots(source: Union[TimeComponent, str],
     
     Parameters
     ----------
-    source : TimeComponent or str
+    source : ScenarioData
         Source of OSeMOSYS time structure.
         
-        - If **TimeComponent**: Uses an initialized TimeComponent object.
+        - If **ScenarioData**: Uses an initialized ScenarioData object.
           Recommended when building scenarios programmatically.
-        - If **str**: Path to directory containing OSeMOSYS CSV files.
-          Required files: YEAR.csv, TIMESLICE.csv, YearSplit.csv.
-          Recommended for converting existing CSV-based scenarios.
-    
+
     multi_investment_periods : bool, default True
         Whether to create multi-period snapshots.
         
@@ -675,7 +672,7 @@ def to_snapshots(source: Union[TimeComponent, str],
     Raises
     ------
     TypeError
-        If source is neither TimeComponent nor str.
+        If source is not ScenarioData.
     ValueError
         If multi_investment_periods=False but multiple years are present.
     ValueError
@@ -685,32 +682,10 @@ def to_snapshots(source: Union[TimeComponent, str],
     
     Examples
     --------
-    Convert from programmatic TimeComponent:
+    Convert from programmatic TimeParameters:
     
-    >>> from pyoscomp.scenario.components.time import TimeComponent
-    >>> time = TimeComponent('scenario/')
-    >>> time.add_time_structure(
-    ...     years=[2025, 2030],
-    ...     seasons={'Winter': 182, 'Summer': 183},
-    ...     daytypes={'Weekday': 5, 'Weekend': 2},
-    ...     brackets={'Day': 12, 'Night': 12}
-    ... )
-    >>> result = to_snapshots(time)
+    >>> result = to_snapshots(ScenarioData.time)
     >>> result.apply_to_network(network)
-    
-    Convert from existing CSV files:
-    
-    >>> result = to_snapshots('path/to/osemosys_scenario/')
-    >>> print(result.snapshots)
-    MultiIndex([(2025, 'Winter_Weekday_Day'), ...])
-    >>> print(result.weightings.sum())
-    17520.0  # 2 years × 8760 hours
-    
-    Single-period model:
-    
-    >>> result = to_snapshots('single_year_scenario/', multi_investment_periods=False)
-    >>> print(result.snapshots)
-    Index(['Winter_Weekday_Day', 'Winter_Weekday_Night', ...], dtype='object', name='timestep')
     
     See Also
     --------
@@ -718,23 +693,12 @@ def to_snapshots(source: Union[TimeComponent, str],
     SnapshotResult : Container class for conversion results
     TimeComponent : OSeMOSYS time structure builder
     """
-    # 1. Normalize input to TimeComponent
-    if isinstance(source, str):
-        time_component = TimeComponent(source)
-        time_component.load()
-    elif isinstance(source, TimeComponent):
-        time_component = source
-    else:
-        raise TypeError(
-            f"source must be TimeComponent or str path to scenario directory, got {type(source)}"
-        )
-    
-    # 2. Extract data from TimeComponent
-    years = time_component.years_df['VALUE'].tolist()
-    timeslice_names = time_component.timeslices_df['VALUE'].tolist()
-    yearsplit_df = time_component.yearsplit_df
+    # 1. Extract time parameters from ScenarioData
+    years = sorted(source.sets.years)
+    timeslice_names = sorted(source.sets.timeslices)
+    yearsplit_df = source.time.year_split
 
-    # 3. Create multi-index snapshots
+    # 2. Create multi-index snapshots
     if multi_investment_periods:
         snapshots = pd.MultiIndex.from_product(
             [years, timeslice_names],
@@ -749,7 +713,7 @@ def to_snapshots(source: Union[TimeComponent, str],
             )
         snapshots = pd.Index(timeslice_names, name='timestep')
 
-    # 4. Create weightings (duration in hours)
+    # 3. Create weightings (duration in hours)
     weightings_dict = {}
     for _, row in yearsplit_df.iterrows():
         year = row['YEAR']
@@ -767,7 +731,7 @@ def to_snapshots(source: Union[TimeComponent, str],
     weightings = pd.Series(weightings_dict)
     weightings = weightings.reindex(snapshots)  # Ensure alignment
     
-    # 5. Create and validate result
+    # 4. Create and validate result
     result = SnapshotResult(
         years=years,
         snapshots=snapshots,
