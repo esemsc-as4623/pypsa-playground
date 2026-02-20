@@ -249,7 +249,7 @@ def run_osemosys(
         if config_file is None:
             # Look for config in standard locations
             config_file = importlib.resources.files("pyoscomp").joinpath(
-                "osemosys_config.yaml"
+                "OSeMOSYS_config.yaml"
             )
             if config_file is None:
                 raise FileNotFoundError(
