@@ -158,48 +158,197 @@ class OSeMOSYSInputTranslator(InputTranslator):
 
 class OSeMOSYSOutputTranslator(OutputTranslator):
     """
-    Translates OSeMOSYS results to standardized output DataFrames.
-    
-    Reads otoole-generated result CSVs and converts to standard format.
-    
-    Attributes
+    Translate OSeMOSYS otoole-CSV results to a harmonized ``ModelResults``.
+
+    The translator reads result CSVs produced by ``otoole`` (or accepts
+    them as a pre-loaded dictionary) and maps them to the model-agnostic
+    ``ModelResults`` interface.
+
+    Extraction mapping:
+
+    * **Topology** — ``REGION`` column from ``TotalCapacityAnnual``
+      (or any result CSV) → nodes.  Trade results → edges (when
+      present).
+    * **Supply** — ``TotalCapacityAnnual`` → installed_capacity;
+      ``NewCapacity`` → new_capacity.
+    * **Objective** — ``TotalDiscountedCost`` ``VALUE`` sum.
+
+    Parameters
     ----------
-    model_output : Any
-        Either a directory path (str) containing result CSVs,
-        or a dictionary of DataFrames.
+    model_output : str or Dict[str, pd.DataFrame]
+        Either a path to the results directory containing otoole CSVs,
+        or a dictionary mapping CSV stem names to DataFrames.
+
+    Examples
+    --------
+    >>> translator = OSeMOSYSOutputTranslator('path/to/results')
+    >>> results = translator.translate()
+    >>> results.supply.installed_capacity
+       REGION  TECHNOLOGY  YEAR     VALUE
+    0  REGION1    GAS_CCGT  2026  0.012684
     """
-    
+
     def __init__(self, model_output):
         """
         Initialize with OSeMOSYS results.
-        
+
         Parameters
         ----------
         model_output : str or Dict[str, pd.DataFrame]
             Either path to results directory or dict of result DataFrames.
         """
         super().__init__(model_output)
-        self._results_dict = None
-    
+        self._results_dict: Optional[Dict[str, pd.DataFrame]] = None
+
+    # ------------------------------------------------------------------ #
+    # lazy loader
+    # ------------------------------------------------------------------ #
+
     @property
     def results_dict(self) -> Dict[str, pd.DataFrame]:
-        """Load results from directory if needed."""
+        """
+        Load result CSVs lazily on first access.
+
+        Returns
+        -------
+        Dict[str, pd.DataFrame]
+            Mapping of CSV stem → DataFrame.
+
+        Raises
+        ------
+        TypeError
+            If ``model_output`` is neither str nor dict.
+        """
         if self._results_dict is None:
             if isinstance(self.model_output, str):
-                self._results_dict = self._load_results_from_directory(self.model_output)
+                self._results_dict = self._load_results_from_directory(
+                    self.model_output
+                )
             elif isinstance(self.model_output, dict):
                 self._results_dict = self.model_output
             else:
-                raise TypeError(f"model_output must be str or dict, got {type(self.model_output)}")
+                raise TypeError(
+                    f"model_output must be str or dict, "
+                    f"got {type(self.model_output)}"
+                )
         return self._results_dict
-    
-    def _load_results_from_directory(self, results_dir: str) -> Dict[str, pd.DataFrame]:
-        """Load all CSV files from results directory."""
+
+    # ------------------------------------------------------------------ #
+    # public API
+    # ------------------------------------------------------------------ #
+
+    def translate(self) -> "ModelResults":
+        """
+        Convert OSeMOSYS results to a ``ModelResults`` container.
+
+        Returns
+        -------
+        ModelResults
+            Harmonized, frozen result object.
+        """
+        from ..interfaces.results import (
+            ModelResults,
+            TopologyResult,
+            SupplyResult,
+        )
+
+        rd = self.results_dict
+
+        # 1. Build TopologyResult
+        topology = self._extract_topology(rd)
+
+        # 2. Build SupplyResult
+        supply = self._extract_supply(rd)
+
+        # 3. Objective
+        objective = self._compute_objective(rd)
+
+        # 4. Metadata
+        metadata: Dict[str, object] = {
+            "result_files": list(rd.keys()),
+        }
+
+        result = ModelResults(
+            model_name="OSeMOSYS",
+            topology=topology,
+            supply=supply,
+            objective=objective,
+            metadata=metadata,
+        )
+        result.validate()
+        return result
+
+    # ------------------------------------------------------------------ #
+    # convenience accessors (kept for backward compatibility)
+    # ------------------------------------------------------------------ #
+
+    def get_objective(self) -> float:
+        """
+        Get the total discounted cost (objective value).
+
+        Returns
+        -------
+        float
+            Sum of ``TotalDiscountedCost.VALUE``.
+        """
+        return self._compute_objective(self.results_dict)
+
+    def get_optimal_capacity(
+        self, technology: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Get optimal capacity, optionally filtered by technology.
+
+        Parameters
+        ----------
+        technology : str, optional
+            Filter to a specific technology name.
+
+        Returns
+        -------
+        pd.DataFrame
+            ``TotalCapacityAnnual`` rows (or empty DataFrame).
+        """
+        cap_df = self.results_dict.get(
+            "TotalCapacityAnnual", pd.DataFrame()
+        )
+        if technology and not cap_df.empty:
+            cap_df = cap_df[cap_df["TECHNOLOGY"] == technology]
+        return cap_df
+
+    # ------------------------------------------------------------------ #
+    # private helpers
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _load_results_from_directory(
+        results_dir: str,
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Load all CSV files from a results directory.
+
+        Parameters
+        ----------
+        results_dir : str
+            Path to directory containing otoole result CSVs.
+
+        Returns
+        -------
+        Dict[str, pd.DataFrame]
+            Mapping of CSV stem name → DataFrame.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``results_dir`` does not exist.
+        """
         results_path = Path(results_dir)
         if not results_path.exists():
-            raise FileNotFoundError(f"Results directory not found: {results_dir}")
-        
-        results = {}
+            raise FileNotFoundError(
+                f"Results directory not found: {results_dir}"
+            )
+
+        results: Dict[str, pd.DataFrame] = {}
         for csv_file in results_path.glob("*.csv"):
             name = csv_file.stem
             try:
@@ -207,70 +356,128 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
                 results[name] = df
             except Exception as e:
                 logger.warning(f"Failed to read {csv_file}: {e}")
-        
+
         return results
-    
-    def translate(self) -> Dict[str, pd.DataFrame]:
+
+    @staticmethod
+    def _extract_topology(
+        rd: Dict[str, pd.DataFrame],
+    ) -> "TopologyResult":
         """
-        Convert OSeMOSYS results to standardized output DataFrames.
-        
+        Infer topology from OSeMOSYS result CSVs.
+
+        Regions are deduced from the ``REGION`` column of any result
+        table.  If ``Trade`` results are present, they become edges.
+
+        Parameters
+        ----------
+        rd : Dict[str, pd.DataFrame]
+            Loaded result CSVs.
+
         Returns
         -------
-        Dict[str, pd.DataFrame]
-            Dictionary of result DataFrames with standardized keys.
+        TopologyResult
         """
-        results = {}
-        
-        # Map OSeMOSYS result names to standard names
-        standard_mapping = {
-            'TotalCapacityAnnual': 'OptimalCapacity',
-            'ProductionByTechnologyAnnual': 'Production',
-            'TotalDiscountedCost': 'Objective',
-            'NewCapacity': 'NewCapacity',
-            'CapitalInvestment': 'CapitalInvestment',
-            'RateOfActivity': 'Dispatch',
-        }
-        
-        for osemosys_name, standard_name in standard_mapping.items():
-            if osemosys_name in self.results_dict:
-                results[standard_name] = self.results_dict[osemosys_name].copy()
-        
-        # Include all original results under their original names too
-        for name, df in self.results_dict.items():
-            if name not in results:
-                results[name] = df.copy()
-        
-        return results
-    
-    def get_objective(self) -> float:
+        from ..interfaces.results import TopologyResult
+
+        # Collect unique region names from all result DataFrames
+        regions: set = set()
+        for df in rd.values():
+            if "REGION" in df.columns:
+                regions.update(df["REGION"].unique())
+        if not regions:
+            # Fallback: single unnamed region
+            regions = {"REGION1"}
+
+        nodes = pd.DataFrame({"NAME": sorted(regions)})
+
+        # Edges from Trade results (if present)
+        trade_df = rd.get("Trade")
+        edges: pd.DataFrame
+        if trade_df is not None and not trade_df.empty:
+            # Trade CSV typically has REGION, rr, YEAR, TIMESLICE, VALUE
+            from_col = "REGION" if "REGION" in trade_df.columns else None
+            to_col = "rr" if "rr" in trade_df.columns else None
+            if from_col and to_col:
+                agg = (
+                    trade_df.groupby([from_col, to_col], as_index=False)
+                    .agg({"VALUE": "sum"})
+                )
+                edges = pd.DataFrame(
+                    {
+                        "FROM": agg[from_col].values,
+                        "TO": agg[to_col].values,
+                        "CAPACITY": agg["VALUE"].abs().values,
+                    }
+                )
+            else:
+                edges = pd.DataFrame(
+                    columns=["FROM", "TO", "CAPACITY"]
+                )
+        else:
+            edges = pd.DataFrame(
+                columns=["FROM", "TO", "CAPACITY"]
+            )
+
+        return TopologyResult(nodes=nodes, edges=edges)
+
+    @staticmethod
+    def _extract_supply(
+        rd: Dict[str, pd.DataFrame],
+    ) -> "SupplyResult":
         """
-        Get the total discounted cost (objective value).
-        
+        Build a ``SupplyResult`` from OSeMOSYS capacity CSVs.
+
+        Parameters
+        ----------
+        rd : Dict[str, pd.DataFrame]
+            Loaded result CSVs.
+
+        Returns
+        -------
+        SupplyResult
+        """
+        from ..interfaces.results import SupplyResult
+
+        required = ["REGION", "TECHNOLOGY", "YEAR", "VALUE"]
+
+        # -- Installed capacity --
+        cap_df = rd.get("TotalCapacityAnnual", pd.DataFrame())
+        if not cap_df.empty:
+            cap_df = cap_df[required].copy()
+        else:
+            cap_df = pd.DataFrame(columns=required)
+
+        # -- New capacity --
+        new_df = rd.get("NewCapacity", pd.DataFrame())
+        if not new_df.empty:
+            new_df = new_df[required].copy()
+        else:
+            new_df = pd.DataFrame(columns=required)
+
+        return SupplyResult(
+            installed_capacity=cap_df,
+            new_capacity=new_df,
+        )
+
+    @staticmethod
+    def _compute_objective(
+        rd: Dict[str, pd.DataFrame],
+    ) -> float:
+        """
+        Sum ``TotalDiscountedCost.VALUE`` to obtain the scalar objective.
+
+        Parameters
+        ----------
+        rd : Dict[str, pd.DataFrame]
+            Loaded result CSVs.
+
         Returns
         -------
         float
-            Total discounted cost.
+            Total discounted system cost, or 0.0 if absent.
         """
-        obj_df = self.results_dict.get('TotalDiscountedCost')
+        obj_df = rd.get("TotalDiscountedCost")
         if obj_df is not None and not obj_df.empty:
-            return obj_df['VALUE'].sum()
+            return float(obj_df["VALUE"].sum())
         return 0.0
-    
-    def get_optimal_capacity(self, technology: Optional[str] = None) -> pd.DataFrame:
-        """
-        Get optimal capacity by technology.
-        
-        Parameters
-        ----------
-        technology : str, optional
-            Filter to specific technology.
-        
-        Returns
-        -------
-        pd.DataFrame
-            Capacity values.
-        """
-        cap_df = self.results_dict.get('TotalCapacityAnnual', pd.DataFrame())
-        if technology and not cap_df.empty:
-            cap_df = cap_df[cap_df['TECHNOLOGY'] == technology]
-        return cap_df
