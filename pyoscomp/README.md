@@ -25,7 +25,7 @@ D = DataClass Object
 
 ---
 ### 1. Scenario Authoring
-> `scenario`, `interfaces`
+> modules: `scenario`, `interfaces`
 ```mermaid
 ---
 config:
@@ -72,13 +72,13 @@ block
 ```
 ---
 ### 2. Translation to Model Input
-> `interfaces`, `translation`
+> modules: `interfaces`, `translation`
 ---
 ### 3. Model Execution
-> `runners`
+> modules: `runners`
 ---
 ### 4. Translation of Model Output
-> `translation`, `interfaces`
+> modules: `translation`, `interfaces`
 ---
 ### 5. Post-processing & Comparison
 > 
