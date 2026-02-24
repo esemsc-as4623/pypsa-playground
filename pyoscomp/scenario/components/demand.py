@@ -491,10 +491,14 @@ class DemandComponent(ScenarioComponent):
 
             if method == 'linear':
                 values = np.linspace(v_start, v_end, len(years_to_fill) + 1)[:-1]
-            elif method == 'cagr' and v_start > 0:
-                steps = y_end - y_start
-                rate = (v_end / v_start) ** (1 / steps) - 1
-                values = [v_start * ((1 + rate) ** (yr - y_start)) for yr in years_to_fill]
+            elif method == 'cagr':
+                if v_start == 0:
+                    # CAGR undefined for zero start; fall back to linear
+                    values = np.linspace(v_start, v_end, len(years_to_fill) + 1)[:-1]
+                else:
+                    steps = y_end - y_start
+                    rate = (v_end / v_start) ** (1 / steps) - 1
+                    values = [v_start * ((1 + rate) ** (yr - y_start)) for yr in years_to_fill]
             else:
                 values = [v_start] * len(years_to_fill)
 
@@ -510,13 +514,33 @@ class DemandComponent(ScenarioComponent):
                 "VALUE": trajectory[last_yr]
             })
 
-        # Extrapolate forward
+        # Extrapolate forward using the same interpolation method
         remaining = [yr for yr in self.years if yr > last_yr]
-        for yr in remaining:
-            records.append({
-                "REGION": region, "FUEL": fuel, "YEAR": yr,
-                "VALUE": max(0, trajectory[last_yr])
-            })
+        if remaining:
+            last_val = trajectory[last_yr]
+            if method == 'step' or len(sorted_years) < 2:
+                extrap_values = [last_val] * len(remaining)
+            else:
+                prev_yr = sorted_years[-2]
+                prev_val = trajectory[prev_yr]
+                y_diff = last_yr - prev_yr
+                if method == 'cagr' and prev_val > 0:
+                    rate = (last_val / prev_val) ** (1 / y_diff) - 1
+                    extrap_values = [
+                        last_val * ((1 + rate) ** (yr - last_yr))
+                        for yr in remaining
+                    ]
+                else:  # linear (or cagr with zero prev_val)
+                    slope = (last_val - prev_val) / y_diff
+                    extrap_values = [
+                        last_val + slope * (yr - last_yr)
+                        for yr in remaining
+                    ]
+            for yr, val in zip(remaining, extrap_values):
+                records.append({
+                    "REGION": region, "FUEL": fuel, "YEAR": yr,
+                    "VALUE": max(0, val)
+                })
 
         return records
 
