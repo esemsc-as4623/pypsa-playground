@@ -203,7 +203,7 @@ class ScenarioComponent(ABC):
         # Create empty DataFrame with correct dtypes
         df = pd.DataFrame({col: pd.Series(dtype=dtype_map[col]) for col in cols})
         return df
-
+        
     def read_csv(self, filename: str, optional: bool = False) -> Optional[pd.DataFrame]:
         """
         Read and validate a CSV file from the scenario directory.

@@ -15,7 +15,7 @@ other components depend on regions being defined.
 """
 
 import pandas as pd
-from typing import List, Optional, Union
+from typing import List, Union
 
 from .base import ScenarioComponent
 
