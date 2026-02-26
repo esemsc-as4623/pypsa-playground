@@ -264,7 +264,7 @@ class DayType:
         Returns
         -------
         bool
-            True if d is within [start, end] for that year.
+            True if d is within [start, end].
         """
         return d.day >= self.day_start and d.day <= self.day_end
     
@@ -393,6 +393,22 @@ class Season:
         """Check if the month range represents a single month."""
         return self.month_start == self.month_end
     
+    def contains_date(self, d: date) -> bool:
+        """
+        Check if a date falls within this Season range.
+        
+        Parameters
+        ----------
+        d : date
+            Date to check.
+        
+        Returns
+        -------
+        bool
+            True if d is within [start, end].
+        """
+        return d.month >= self.month_start and d.month <= self.month_end
+    
     def duration_months(self) -> int:
         """
         Calculate number of months in this Season.
@@ -520,7 +536,8 @@ class Timeslice:
         """
         if hasattr(ts, 'to_pydatetime'):
             ts = ts.to_pydatetime()
-        
+        if not self.season.contains_date(ts.date()):
+            return False
         if not self.daytype.contains_date(ts.date()):
             return False
         if not self.dailytimebracket.contains_time(ts.time()):
