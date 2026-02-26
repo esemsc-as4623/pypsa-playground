@@ -181,7 +181,7 @@ def create_seasons_from_dates(dates: List[date]) -> set[Season]:
         )) # 1 month
 
         # if next month is not consecutive
-        if unique_months[i+1] > unique_months[i] + 1:
+        if i < len(unique_months) - 1 and unique_months[i+1] > unique_months[i] + 1:
             # add group of missing months as one season
             seasons.add(Season(
                 month_start=unique_months[i] + 1,
@@ -323,7 +323,7 @@ def create_daytypes_from_dates(dates: List[date]) -> set[DayType]:
         )) # 1 day
 
         # if next date is not consecutive
-        if unique_days[i+1] > unique_days[i] + 1:
+        if i < len(unique_days) - 1 and unique_days[i+1] > unique_days[i] + 1:
             # add group of missing days as one daytype, with max duration of 7 days
             start_day = unique_days[i] + 1
             end_day = min(start_day + 6, unique_days[i+1] - 1) # max 6 days to enforce max duration of 7 days in DayType

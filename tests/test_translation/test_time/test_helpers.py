@@ -59,7 +59,7 @@ class TestCreateSeasonsFromDates:
         seasons = create_seasons_from_dates(dates)
         
         # Should create 3 seasons: before, Jun, after
-        assert len(seasons) == 5
+        assert len(seasons) == 3
         
         season_list = sorted(seasons)
         assert season_list[0] == Season(1, 5)  # Before
@@ -88,12 +88,12 @@ class TestCreateSeasonsFromDates:
         seasons = create_seasons_from_dates(dates)
         
         # Should create: before, Jun, after
-        assert len(seasons) == 5
+        assert len(seasons) == 3
         
         season_list = sorted(seasons)
         assert season_list[0] == Season(1, 5)  # Before
         assert season_list[1] == Season(6, 6)  # Jun
-        assert season_list[4] == Season(7, 12)  # After
+        assert season_list[2] == Season(7, 12)  # After
     
     def test_gapped_dates_large_gap(self):
         """Test large gap between dates."""
@@ -188,7 +188,7 @@ class TestCreateSeasonsFromDates:
         seasons = create_seasons_from_dates(dates)
         
         # Should create: Jan, after
-        assert len(seasons) == 3
+        assert len(seasons) == 2
         
         season_list = sorted(seasons)
         assert season_list[0] == Season(1, 1)  # Jan
@@ -272,7 +272,7 @@ class TestCreateSeasonsFromDates:
         for s in seasons:
             # Verify no season wraps year
             start_ordinal = date(2000, s.month_start, 1).toordinal()
-            end_ordinal = date(2000, s.month_end, days_in_month(s.month_end)).toordinal()
+            end_ordinal = date(2000, s.month_end, days_in_month(2000, s.month_end)).toordinal()
             assert start_ordinal <= end_ordinal, f"Season {s} wraps year"
     
     # ========== Leap Year Dates ==========
@@ -347,8 +347,9 @@ class TestCreateSeasonsFromDates:
         seasons = create_seasons_from_dates(dates)
         
         # Creates: before, Mar, gap, Jun, gap, Sep, after
+        assert len(seasons) == 7
         season_list = sorted(seasons)
-        assert season_list[0] == Season(1, 5)  # Before
+        assert season_list[0] == Season(1, 2)  # Before
         assert season_list[1] == Season(3, 3)  # Mar
         assert season_list[2] == Season(4, 5)  # Gap: Apr-May
         assert season_list[3] == Season(6, 6)  # Jun
@@ -364,7 +365,7 @@ class TestCreateSeasonsFromDates:
         seasons = create_seasons_from_dates(dates)
         
         # Sum durations should equal full year
-        total_months = sum(season.duration_months(2020) for season in seasons)
+        total_months = sum(season.duration_months() for season in seasons)
         assert total_months == 12  # Full year in months
     
     def test_coverage_full_year_multiple_dates(self):
@@ -373,7 +374,7 @@ class TestCreateSeasonsFromDates:
         seasons = create_seasons_from_dates(dates)
         
         # Sum durations should equal full year
-        total_months = sum(season.duration_months(2020) for season in seasons)
+        total_months = sum(season.duration_months() for season in seasons)
         assert total_months == 12  # Full year in months
     
     def test_coverage_no_overlaps(self):
@@ -473,8 +474,8 @@ class TestCreateDaytypesFromDates:
         
         # Check individual days exist
         daytype_list = sorted(daytypes)
-        for i, d in enumerate(range(1, 8)):
-            assert daytype_list[i+1] == DayType(3, d, 3, d)
+        for d in range(1, 8):
+            assert daytype_list[d-1] == DayType(d, d)
     
     # ========== Gapped Dates ==========
     
@@ -571,16 +572,16 @@ class TestCreateDaytypesFromDates:
         dates = [date(2020, 6, 1)]
         daytypes = create_daytypes_from_dates(dates)
         
-        # Should create: 1, 2-7, 8-14, 15-21, 22-28, 29-31
+        # Should create: 1, 2-8, 9-15, 16-22, 23-29, 30-31
         assert len(daytypes) == 6
         
         daytype_list = sorted(daytypes)
         assert daytype_list[0] == DayType(1, 1)
-        assert daytype_list[1] == DayType(2, 7)
-        assert daytype_list[2] == DayType(8, 14)
-        assert daytype_list[3] == DayType(15, 21)
-        assert daytype_list[4] == DayType(22, 28)
-        assert daytype_list[5] == DayType(29, 31)
+        assert daytype_list[1] == DayType(2, 8)
+        assert daytype_list[2] == DayType(9, 15)
+        assert daytype_list[3] == DayType(16, 22)
+        assert daytype_list[4] == DayType(23, 29)
+        assert daytype_list[5] == DayType(30, 31)
     
     # ========== End of Year Boundary ==========
     
