@@ -4,6 +4,7 @@ import pytest
 import pandas as pd
 
 from pyoscomp.scenario.components.time import TimeComponent
+from pyoscomp.constants import hours_in_year
 
 
 @pytest.fixture
@@ -23,10 +24,10 @@ def simple_osemosys_scenario(tmp_path):
     
     years = [2025]
     timeslices = [
-        'Winter_Weekday_Day', 'Winter_Weekday_Night',
-        'Winter_Weekend_Day', 'Winter_Weekend_Night',
-        'Summer_Weekday_Day', 'Summer_Weekday_Night',
-        'Summer_Weekend_Day', 'Summer_Weekend_Night'
+        'S1_D1_H1', 'S1_D1_H2',
+        'S1_D2_H1', 'S1_D2_H2',
+        'S2_D1_H1', 'S2_D1_H2',
+        'S2_D2_H1', 'S2_D2_H2'
     ]
     
     # YEAR.csv
@@ -36,15 +37,15 @@ def simple_osemosys_scenario(tmp_path):
     pd.DataFrame({'VALUE': timeslices}).to_csv(scenario_dir / "TIMESLICE.csv", index=False)
     
     # SEASON.csv
-    pd.DataFrame({'VALUE': ['Winter', 'Summer']}).to_csv(scenario_dir / "SEASON.csv", index=False)
+    pd.DataFrame({'VALUE': ['S1', 'S2']}).to_csv(scenario_dir / "SEASON.csv", index=False)
     
     # DAYTYPE.csv
-    pd.DataFrame({'VALUE': ['Weekday', 'Weekend']}).to_csv(scenario_dir / "DAYTYPE.csv", index=False)
+    pd.DataFrame({'VALUE': ['D1', 'D2']}).to_csv(scenario_dir / "DAYTYPE.csv", index=False)
     
     # DAILYTIMEBRACKET.csv
-    pd.DataFrame({'VALUE': ['Day', 'Night']}).to_csv(scenario_dir / "DAILYTIMEBRACKET.csv", index=False)
+    pd.DataFrame({'VALUE': ['H1', 'H2']}).to_csv(scenario_dir / "DAILYTIMEBRACKET.csv", index=False)
     
-    # YearSplit.csv - equal fractions (1/8 each)
+    # YearSplit.csv - equal fractions
     yearsplit_data = []
     for ts in timeslices:
         yearsplit_data.append({
@@ -54,23 +55,23 @@ def simple_osemosys_scenario(tmp_path):
         })
     pd.DataFrame(yearsplit_data).to_csv(scenario_dir / "YearSplit.csv", index=False)
     
-    # DaySplit.csv - equal 3 hours each (8 × 3 = 24 hours/day)
+    # DaySplit.csv - half day as fraction of year
     daysplit_data = []
     for year in years:
         for ts in timeslices:
             daysplit_data.append({
                 'TIMESLICE': ts,
                 'YEAR': year,
-                'VALUE': 3.0 / 24.0
+                'VALUE': 12.0 / (24.0*hours_in_year(year))
             })
     pd.DataFrame(daysplit_data).to_csv(scenario_dir / "DaySplit.csv", index=False)
     
     # DaysInDayType.csv
     daysindaytype_data = [
-        {'SEASON': 'Winter', 'DAYTYPE': 'Weekday', 'VALUE': 130},
-        {'SEASON': 'Winter', 'DAYTYPE': 'Weekend', 'VALUE': 52},
-        {'SEASON': 'Summer', 'DAYTYPE': 'Weekday', 'VALUE': 130},
-        {'SEASON': 'Summer', 'DAYTYPE': 'Weekend', 'VALUE': 53}
+        {'SEASON': 'S1', 'DAYTYPE': 'D1', 'VALUE': 5},
+        {'SEASON': 'S1', 'DAYTYPE': 'D2', 'VALUE': 2},
+        {'SEASON': 'S2', 'DAYTYPE': 'D1', 'VALUE': 5},
+        {'SEASON': 'S2', 'DAYTYPE': 'D2', 'VALUE': 2}
     ]
     pd.DataFrame(daysindaytype_data).to_csv(scenario_dir / "DaysInDayType.csv", index=False)
     
@@ -78,21 +79,21 @@ def simple_osemosys_scenario(tmp_path):
     # Conversionls (timeslice to season)
     conversionls_data = []
     for ts in timeslices:
-        season = 'Winter' if 'Winter' in ts else 'Summer'
+        season = 'S1' if 'S1' in ts else 'S2'
         conversionls_data.append({'TIMESLICE': ts, 'SEASON': season, 'VALUE': 1.0})
     pd.DataFrame(conversionls_data).to_csv(scenario_dir / "Conversionls.csv", index=False)
     
     # Conversionld (timeslice to daytype)
     conversionld_data = []
     for ts in timeslices:
-        daytype = 'Weekday' if 'Weekday' in ts else 'Weekend'
+        daytype = 'D1' if 'D1' in ts else 'D2'
         conversionld_data.append({'TIMESLICE': ts, 'DAYTYPE': daytype, 'VALUE': 1.0})
     pd.DataFrame(conversionld_data).to_csv(scenario_dir / "Conversionld.csv", index=False)
     
     # Conversionlh (timeslice to daily time bracket)
     conversionlh_data = []
     for ts in timeslices:
-        bracket = 'Day' if 'Day' in ts else 'Night'
+        bracket = 'H1' if 'H1' in ts else 'H2'
         conversionlh_data.append({'TIMESLICE': ts, 'DAILYTIMEBRACKET': bracket, 'VALUE': 1.0})
     pd.DataFrame(conversionlh_data).to_csv(scenario_dir / "Conversionlh.csv", index=False)
     
@@ -106,24 +107,27 @@ def complex_osemosys_scenario(tmp_path):
     
     Structure:
     - Multiple years (2025, 2030, 2035)
-    - 4 seasons
-    - 2 daytypes
-    - 3 brackets
+    - 4 seasons (single & multi-month)
+    - 2 daytypes (single & multi-day)
+    - 3 brackets (single & multi-hour)
     - Total: 24 timeslices per year
     """
     scenario_dir = tmp_path / "complex_scenario"
     scenario_dir.mkdir()
     
     years = [2025, 2030, 2035]
-    seasons = ['Winter', 'Spring', 'Summer', 'Fall']
-    daytypes = ['Weekday', 'Weekend']
-    brackets = ['Morning', 'Afternoon', 'Night']
+    seasons = {'Jan': 1,
+               'Feb-Jun': 5,
+               'Jul': 1,
+               'Jul-Dec': 6}
+    daytypes = {'Peak Day': 1, 'Rest-of-Week': 6}
+    brackets = {'Peak-hour': 1, 'Some hours': 11, 'Other Hours': 12}
     
     # Generate all timeslice names
     timeslices = []
-    for season in seasons:
-        for daytype in daytypes:
-            for bracket in brackets:
+    for season in seasons.keys():
+        for daytype in daytypes.keys():
+            for bracket in brackets.keys():
                 timeslices.append(f"{season}_{daytype}_{bracket}")
     
     # YEAR.csv
@@ -133,45 +137,13 @@ def complex_osemosys_scenario(tmp_path):
     pd.DataFrame({'VALUE': timeslices}).to_csv(scenario_dir / "TIMESLICE.csv", index=False)
     
     # SEASON.csv
-    pd.DataFrame({'VALUE': seasons}).to_csv(scenario_dir / "SEASON.csv", index=False)
+    pd.DataFrame({'VALUE': list(seasons.keys())}).to_csv(scenario_dir / "SEASON.csv", index=False)
     
     # DAYTYPE.csv
-    pd.DataFrame({'VALUE': daytypes}).to_csv(scenario_dir / "DAYTYPE.csv", index=False)
+    pd.DataFrame({'VALUE': list(daytypes.keys())}).to_csv(scenario_dir / "DAYTYPE.csv", index=False)
     
     # DAILYTIMEBRACKET.csv
-    pd.DataFrame({'VALUE': brackets}).to_csv(scenario_dir / "DAILYTIMEBRACKET.csv", index=False)
-    
-    # YearSplit.csv - equal fractions
-    yearsplit_data = []
-    for year in years:
-        for ts in timeslices:
-            yearsplit_data.append({
-                'TIMESLICE': ts,
-                'YEAR': year,
-                'VALUE': 1.0 / len(timeslices)
-            })
-    pd.DataFrame(yearsplit_data).to_csv(scenario_dir / "YearSplit.csv", index=False)
-    
-    # DaySplit.csv - 8 hours each (3 × 8 = 24)
-    daysplit_data = []
-    for year in years:
-        for ts in timeslices:
-            daysplit_data.append({
-                'TIMESLICE': ts,
-                'YEAR': year,
-                'VALUE': 8.0 / 24.0
-            })
-    pd.DataFrame(daysplit_data).to_csv(scenario_dir / "DaySplit.csv", index=False)
-    
-    # DaysInDayType.csv - approximate distribution
-    daysindaytype_data = []
-    season_days = {'Winter': 90, 'Spring': 92, 'Summer': 92, 'Fall': 91}
-    for season, days in season_days.items():
-        weekday_days = int(days * 5 / 7)
-        weekend_days = days - weekday_days
-        daysindaytype_data.append({'SEASON': season, 'DAYTYPE': 'Weekday', 'VALUE': weekday_days})
-        daysindaytype_data.append({'SEASON': season, 'DAYTYPE': 'Weekend', 'VALUE': weekend_days})
-    pd.DataFrame(daysindaytype_data).to_csv(scenario_dir / "DaysInDayType.csv", index=False)
+    pd.DataFrame({'VALUE': list(brackets.keys())}).to_csv(scenario_dir / "DAILYTIMEBRACKET.csv", index=False)
     
     # Conversion tables
     conversionls_data = []
@@ -191,6 +163,39 @@ def complex_osemosys_scenario(tmp_path):
         bracket = ts.split('_')[2]
         conversionlh_data.append({'TIMESLICE': ts, 'DAILYTIMEBRACKET': bracket, 'VALUE': 1.0})
     pd.DataFrame(conversionlh_data).to_csv(scenario_dir / "Conversionlh.csv", index=False)
+    
+    # YearSplit.csv
+    yearsplit_data = []
+    for year in years:
+        for ts in timeslices:
+            season = ts.split('_')[0]
+            daytype = ts.split('_')[1]
+            bracket = ts.split('_')[2]
+            yearsplit_data.append({
+                'TIMESLICE': ts,
+                'YEAR': year,
+                'VALUE': seasons[season]/12.0 * daytypes[daytype]/7.0 * brackets[bracket]/24.0
+            })
+    pd.DataFrame(yearsplit_data).to_csv(scenario_dir / "YearSplit.csv", index=False)
+    
+    # DaySplit.csv
+    daysplit_data = []
+    for year in years:
+        for ts in timeslices:
+            bracket = ts.split('_')[2]
+            daysplit_data.append({
+                'TIMESLICE': ts,
+                'YEAR': year,
+                'VALUE': brackets[bracket] / 24.0
+            })
+    pd.DataFrame(daysplit_data).to_csv(scenario_dir / "DaySplit.csv", index=False)
+    
+    # DaysInDayType.csv
+    daysindaytype_data = []
+    for season in seasons.keys():
+        for daytype in daytypes.keys():
+            daysindaytype_data.append({'SEASON': season, 'DAYTYPE': daytype, 'VALUE': daytypes[daytype]})
+    pd.DataFrame(daysindaytype_data).to_csv(scenario_dir / "DaysInDayType.csv", index=False)
     
     return str(scenario_dir)
 
@@ -245,14 +250,13 @@ def leap_year_osemosys_scenario(tmp_path):
         daysplit_data.append({
             'TIMESLICE': ts,
             'YEAR': 2024,
-            'VALUE': 0.5
+            'VALUE': 12.0 / (24.0 * hours_in_year(2024))
         })
     pd.DataFrame(daysplit_data).to_csv(scenario_dir / "DaySplit.csv", index=False)
     
-    # DaysInDayType.csv - 366 days total (leap year)
+    # DaysInDayType.csv
     daysindaytype_data = [
-        {'SEASON': 'H1', 'DAYTYPE': 'All', 'VALUE': 183},
-        {'SEASON': 'H2', 'DAYTYPE': 'All', 'VALUE': 183}
+        {'SEASON': 'H1', 'DAYTYPE': 'All', 'VALUE': 7},
     ]
     pd.DataFrame(daysindaytype_data).to_csv(scenario_dir / "DaysInDayType.csv", index=False)
     
