@@ -2,10 +2,10 @@
 
 import pandas as pd
 from datetime import time, date, datetime
-from typing import Tuple, Optional, Union
+from typing import Tuple, Union
 from dataclasses import dataclass, field
 
-from ...constants import ENDOFDAY, days_in_month, is_leap_year, hours_in_year
+from ...constants import ENDOFDAY, days_in_month, hours_in_year
 
 
 @dataclass
@@ -36,7 +36,7 @@ class DailyTimeBracket:
                 self.name = "DAY"
             else:
                 end_str = "24:00" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H%M')
-                self.name = f"T{self.hour_start.strftime('%H%M')}_{end_str}"
+                self.name = f"{self.hour_start.strftime('%H:%M')} to {end_str}"
     
     def validate(self):
         """
@@ -151,80 +151,52 @@ class DailyTimeBracket:
 @dataclass
 class DayType:
     """
-    Day-of-year range structure (year-agnostic).
+    Day-of-month range structure (year-agnostic).
     
-    Represents a date range within a calendar year using closed interval [start, end].
-    Automatically handles leap year adjustments (Feb 29).
+    Represents a date range within a month, season, group of months using closed interval [start, end].
+    Automatically handles days-in-month and leap year adjustments.
     
     Attributes
     ----------
-    month_start : int
-        Start month (1-12).
     day_start : int
-        Start day (1-31, depending on month).
-    month_end : int
-        End month (1-12).
+        Start day (1-31).
     day_end : int
-        End day (1-31, depending on month).
+        End day (1-31).
     name : str, optional
-        DayType name. Auto-generated if not provided (e.g., "01-01 to 03-15").
+        DayType name. Auto-generated if not provided (e.g., "01-01 to 08-15").
     """
-    month_start: int 
     day_start: int
-    month_end: int
     day_end: int
+    max_days = 7 # Max days represented by a DayType
     name: str = field(default="")
 
     def __post_init__(self):
         self.validate()
         # Initialize the name attribute if not provided
         if not self.name:
-            if self.is_full_year():
-                self.name = "YEAR"
-            else:
-                self.name = f"{self.month_start:02d}-{self.day_start:02d} to {self.month_end:02d}-{self.day_end:02d}"
+            self.name = f"{self.day_start:02d} to {self.day_end:02d}"
 
     def validate(self):
         """Validate month/day combinations."""
-        # Month validation
-        if not (1 <= self.month_start <= 12):
-            raise ValueError(f"month_start must be 1-12, got {self.month_start}")
-        if not (1 <= self.month_end <= 12):
-            raise ValueError(f"month_end must be 1-12, got {self.month_end}")
-        
-        # Day validation (use max possible days, accounting for leap years)
-        max_day_start = 29 if self.month_start == 2 else days_in_month(2000, self.month_start)
-        max_day_end = 29 if self.month_end == 2 else days_in_month(2000, self.month_end)
-        
-        if not (1 <= self.day_start <= max_day_start):
-            raise ValueError(f"day_start must be 1-{max_day_start} for month {self.month_start}, got {self.day_start}")
-        if not (1 <= self.day_end <= max_day_end):
-            raise ValueError(f"day_end must be 1-{max_day_end} for month {self.month_end}")
-        
-        # Validate that start is not after end (allowing for same day)
-        if self.month_start == self.month_end and self.day_start > self.day_end:
-            raise ValueError(
-                f"For the same month, day_start ({self.day_start}) must not be after day_end ({self.day_end})"
-            )
-        
-        # Prevent year-wrapping intervals
-        start_ordinal = (self.month_start, self.day_start)
-        end_ordinal = (self.month_end, self.day_end)
-        if start_ordinal > end_ordinal:
-            raise ValueError(
-                f"Year-wrapping intervals not supported. "
-                f"Start {start_ordinal} > End {end_ordinal}"
-            )
+        if not (1 <= self.day_start <= 31):
+            raise ValueError(f"day_start must be 1-31, got {self.day_start}")
+        if not (1 <= self.day_end <= 31):
+            raise ValueError(f"day_end must be 1-31, got {self.day_end}")
+        if self.day_start > self.day_end:
+            raise ValueError("Start day must be less than or equal to end day." \
+            "Month-wrapping day types not supported.")
+        if self.day_end - self.day_start > self.max_days:
+            raise ValueError(f"DayType range cannot exceed {self.max_days} days. Got {self.day_start} to {self.day_end}.")
     
     @classmethod
     def from_string(cls, s: str) -> 'DayType':
         """
-        Create DayType from string like "03-15 to 06-30" or "01-01 to 12-31".
+        Create DayType from string like "01-15" or "01 to 15".
     
         Parameters
         ----------
         s : str
-            String in format "MM-DD to MM-DD".
+            String in format "DD-DD" or "DD to DD" (e.g., "01-15" or "01 to 15").
     
         Returns
         -------
@@ -233,55 +205,52 @@ class DayType:
     
         Examples
         --------
-        >>> DayType.from_string("03-15 to 06-30")
-        DayType(3-15 to 6-30)
-        >>> DayType.from_string("01-01 to 12-31")
-        DayType(1-1 to 12-31)
+        >>> DayType.from_string("15-15")
+        DayType(15 to 15) # single-day
+        >>> DayType.from_string("03-06")
+        DayType(03 to 06) # multi-day
         """
         try:
-            left, right = s.split('to')
-            left = left.strip()
-            right = right.strip()
-            m1, d1 = map(int, left.split('-'))
-            m2, d2 = map(int, right.split('-'))
+            if "to" in s:
+                d1, d2 = s.split('to')
+            else:
+                d1, d2 = s.split('-')
+            d1 = d1.strip()
+            d2 = d2.strip()
         except Exception as e:
-            raise ValueError(f"Invalid DayType string: '{s}'. Expected format 'MM-DD to MM-DD'.") from e
-        return cls(month_start=m1, day_start=d1, month_end=m2, day_end=d2)
+            raise ValueError(f"Invalid DayType string: '{s}'. Expected format 'DD-DD' or 'DD to DD'.") from e
+        return cls(day_start=int(d1), day_end=int(d2))
     
-    def is_full_year(self) -> bool:
-        """Check if the day range covers the full year."""
-        return (self.month_start == 1 and self.day_start == 1 and 
-                self.month_end == 12 and self.day_end == 31)
+    def is_one_day(self) -> bool:
+        """Check if the day range represents a single day."""
+        return self.day_start == self.day_end
     
-    def to_dates(self, year: int) -> Tuple[date, date]:
+    def to_dates(self, year: int, month: int) -> Union[Tuple[date, date], Tuple[int, int]]:
         """
         Convert to actual date objects for a specific year.
         
-        Parameters
         ----------
         year : int
             Year to generate dates for.
+        month: int
+            Month to generate dates for (1-12).
         
         Returns
         -------
-        Tuple[date, date]
-            (start_date, end_date) for the specified year.
-            Feb 29 adjusted to Feb 28 in non-leap years.
+        Tuple[date, date] or Tuple[int, int]
+            (start_date, end_date) for the specified year and month.
+            (-1, -1) if the day range is invalid for that month/year (e.g., Feb 29 in non-leap year, Apr 31, etc.).
         """
-        # Handle Feb 29 in non-leap years for start
+        # Get actual maximum number of days in year and month
+        max_day = days_in_month(year, month)
+
+        if self.day_start > max_day:
+            return -1, -1
+        
         day_start = self.day_start
-        if self.month_start == 2 and self.day_start == 29 and not is_leap_year(year):
-            day_start = 28
+        day_end = min(max_day, self.day_end)
         
-        start = date(year, self.month_start, day_start)
-        
-        # Handle Feb 29 in non-leap years for end
-        day_end = self.day_end
-        if self.month_end == 2 and self.day_end == 29 and not is_leap_year(year):
-            day_end = 28
-        
-        end = date(year, self.month_end, day_end)
-        return start, end
+        return date(year, month, day_start), date(year, month, day_end)
     
     def contains_date(self, d: date) -> bool:
         """
@@ -297,23 +266,18 @@ class DayType:
         bool
             True if d is within [start, end] for that year.
         """
-        # Special case: Feb 29 only in non-leap year doesn't contain any date
-        if (self.month_start == 2 and self.day_start == 29 and
-            self.month_end == 2 and self.day_end == 29 and
-            not is_leap_year(d.year)):
-            return False
-        
-        start, end = self.to_dates(d.year)
-        return start <= d <= end
+        return d.day >= self.day_start and d.day <= self.day_end
     
-    def duration_days(self, year: int) -> int:
+    def duration_days(self, year: int, month: int) -> int:
         """
-        Calculate number of days in this DayType for a specific year.
+        Calculate number of days in this DayType for a specific year and month.
         
         Parameters
         ----------
         year : int
             Year to calculate for.
+        month: int
+            Month to calculate for (1-12).
         
         Returns
         -------
@@ -322,42 +286,149 @@ class DayType:
         """
         assert year >= 1, "Year must be a positive integer."
         
-        # Special case: Feb 29 only in non-leap year doesn't exist
-        if (self.month_start == 2 and self.day_start == 29 and
-            self.month_end == 2 and self.day_end == 29 and
-            not is_leap_year(year)):
+        start, end = self.to_dates(year, month)
+        if start == -1:
             return 0
-        
-        start, end = self.to_dates(year)
         return (end - start).days + 1  # +1 for closed interval
     
     def __hash__(self):
-        """Compute hash based on start and end month/day."""
-        return hash((self.month_start, self.day_start, self.month_end, self.day_end))
+        """Compute hash based on start and end day."""
+        return hash((self.day_start, self.day_end))
     
     def __eq__(self, other):
         """Check equality based on start and end month/day."""
         if not isinstance(other, DayType):
             return False
-        return (self.month_start == other.month_start and 
-                self.day_start == other.day_start and
-                self.month_end == other.month_end and 
+        return (self.day_start == other.day_start and
                 self.day_end == other.day_end)
     
     def __lt__(self, other):
         """Enable sorting by start date."""
         if not isinstance(other, DayType):
             return NotImplemented
-        return (self.month_start, self.day_start) < (other.month_start, other.day_start)
+        return (self.day_start) < (other.day_start)
     
     def __repr__(self):
-        return f"DayType({self.month_start}-{self.day_start} to {self.month_end}-{self.day_end})"
+        return f"DayType({self.day_start} to {self.day_end})"
+
+
+@dataclass
+class Season:
+    """
+    Month(s)-of-year structure (year-agnostic).
+    
+    Represents a month range within a calendar year using closed interval [start, end].
+    
+    Attributes
+    ----------
+    month_start : int
+        Start month (1-12).
+    month_end : int
+        End month (1-12).
+    name : str, optional
+        Season name. Auto-generated if not provided (e.g., "01 to 03").
+    """
+    month_start: int
+    month_end: int
+    name: str = field(default="")
+
+    def __post_init__(self):
+        self.validate()
+        if not self.name:
+            if self.is_full_year():
+                self.name = "YEAR"
+            else:
+                self.name = f"{self.month_start:02d} to {self.month_end:02d}"
+
+    def validate(self):
+        """Validate month range."""
+        if not (1 <= self.month_start <= 12):
+            raise ValueError("month_start must be between 1 and 12.")
+        if not (1 <= self.month_end <= 12):
+            raise ValueError("month_end must be between 1 and 12.")
+        if self.month_start > self.month_end:
+            raise ValueError("Start month must be less than or equal to end month." \
+            "Year-wrapping seasons not supported.")
+        
+    @classmethod
+    def from_string(cls, s: str) -> 'Season':
+        """
+        Create Season from string like "01-03" or "01 to 03".
+
+        Parameters
+        ----------
+        s : str
+            String in format "MM-MM" or "MM to MM" (e.g., "01-03" or "01 to 03").
+
+        Returns
+        -------
+        Season
+            Season instance for the given range.
+
+        Examples
+        --------
+        >>> Season.from_string("03-03")
+        Season(03 to 03) # single-month
+        >>> Season.from_string("06 to 10")
+        Season(06 to 10) # multi-month
+        >>> Season.from_string("01 to 12")
+        Season(01 to 12) # full-year
+        """
+        try:
+            if "to" in s:
+                m1, m2 = s.split('to')
+            else:
+                m1, m2 = s.split('-')
+            m1 = m1.strip()
+            m2 = m2.strip()
+        except Exception as e:
+            raise ValueError(f"Invalid Season string: '{s}'. Expected format 'MM-MM' or 'MM to MM'.") from e
+        return cls(month_start=int(m1), month_end=int(m2))
+    
+    def is_full_year(self) -> bool:
+        """Check if the month range covers the full year."""
+        return (self.month_start == 1 and self.month_end == 12)
+    
+    def is_one_month(self) -> bool:
+        """Check if the month range represents a single month."""
+        return self.month_start == self.month_end
+    
+    def duration_months(self) -> int:
+        """
+        Calculate number of months in this Season.
+        
+        Returns
+        -------
+        int
+            Number of months (e.g., 3 for Jan-Mar).
+        """
+        return self.month_end - self.month_start + 1
+    
+    def __hash__(self):
+        """Compute hash based on start and end months"""
+        return hash((self.month_start, self.month_end))
+    
+    def __eq__(self, other):
+        """Check equality based on start and end months"""
+        if not isinstance(other, Season):
+            return False
+        return (self.month_start == other.month_start and
+                self.month_end == other.month_end)
+    
+    def __lt__(self, other):
+        """Enable sorting by start month"""
+        if not isinstance(other, Season):
+            return NotImplemented
+        return (self.month_start) < (other.month_start)
+    
+    def __repr__(self):
+        return f"Season({self.month_start} to {self.month_end})"
 
 
 @dataclass
 class Timeslice:
     """
-    OSeMOSYS temporal slice combining season, day-of-year, and time-of-day.
+    OSeMOSYS temporal slice combining month(s)-of-year, day(s)-of-month(s), and time-of-day(s).
     
     Represents the hierarchical time structure in OSeMOSYS models:
     Season → DayType → DailyTimeBracket.
@@ -373,7 +444,7 @@ class Timeslice:
     """
     daytype: DayType
     dailytimebracket: DailyTimeBracket
-    season: Optional[str] = "X"  # Placeholder for no season
+    season: Season
     
     @property
     def name(self) -> str:
@@ -383,9 +454,9 @@ class Timeslice:
         Returns
         -------
         str
-            Format: "Season_DayType_DailyTimeBracket" (e.g., "X_01-01 to 03-31_T0600_1200").
+            Format: "[Season]_[DayType]_[DailyTimeBracket]" (e.g., "[01 to 01]_[10 to 15]_[06:00 to 12:00]").
         """
-        return f"{self.season}_{self.daytype.name}_{self.dailytimebracket.name}"
+        return f"[{self.season.name}]_[{self.daytype.name}]_[{self.dailytimebracket.name}]"
     
     @property
     def hour_start(self) -> time:
@@ -394,12 +465,6 @@ class Timeslice:
     @property
     def hour_end(self) -> time:
         return self.dailytimebracket.hour_end
-    
-    def get_day_start(self, d: date) -> date:
-        return self.daytype.to_dates(d.year)[0]
-    
-    def get_day_end(self, d: date) -> date:
-        return self.daytype.to_dates(d.year)[1]
     
     def duration_hours(self, year: int) -> float:
         """
@@ -416,9 +481,12 @@ class Timeslice:
             Duration in hours (days × hours_per_day).
         """
         assert year >= 1, "Year must be a positive integer."
-        days = self.daytype.duration_days(year)
+        
+        total_days = 0
+        for month in range(self.season.month_start, self.season.month_end + 1):
+            total_days += self.daytype.duration_days(year, month)
         hours_per_day = self.dailytimebracket.duration_hours()
-        return days * hours_per_day
+        return total_days * hours_per_day
     
     def year_fraction(self, year: int) -> float:
         """

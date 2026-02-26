@@ -2,10 +2,10 @@
 
 import pandas as pd
 from datetime import datetime, time, date, timedelta
-from typing import List, Set, Dict, Union, Tuple
+from typing import List, Set, Union
 
 from ...constants import ENDOFDAY, hours_in_year
-from .structures import DayType, DailyTimeBracket, Timeslice
+from .structures import Season, DayType, DailyTimeBracket, Timeslice
 from .results import TimesliceResult, SnapshotResult
 from ...interfaces.containers import ScenarioData
 
@@ -98,44 +98,144 @@ def create_timebrackets_from_times(times: List[time]) -> Set[DailyTimeBracket]:
     return brackets
 
 
+def create_seasons_from_dates(dates: List[date]) -> set[Season]:
+    """
+    Create non-overlapping Season objects from a list of dates.
+
+    Takes a list of calendar dates and partitions the year into non-overlapping
+    month(s)-of-year ranges. Each input date represents a SINGLE MONTH Season, with
+    gaps between dates filled by multi-month Seasons. Start and end of year boundaries
+    are handled automatically.
+
+    Parameters
+    ----------
+    dates: List[date]
+        List of datetime.date objects representing specific days of interest.
+        If January or December are not included, boundary Seasons will be added
+        automatically.
+
+    Returns
+    -------
+    Set[Season]
+        Set of Season objects that partition the year (Jan 1 - Dec 31).
+        Includes:
+        
+        - Single-month Seasons for each input date
+        - Multi-month Seasons for gaps between consecutive dates
+        - Boundary Seasons for start/end of year if needed
+
+    Notes
+    -----
+    Algorithm details:
+
+    - Each input date becomes a 1-month Season
+    - Non-consecutive dates are separated by multi-month Seasons covering the gap
+    - Start-of-year (Jan 1) and end-of-year (Dec 31) boundaries are added if missing
+    - The resulting Seasons form a complete, non-overlapping partition of the year
+
+    The function ensures complete coverage of all 365/366 days with no gaps or overlaps.
+
+    Examples
+    --------
+    Create Seasons from specific dates:
+
+    >>> from datetime import date
+    >>> dates = [date(2025, 1, 1), date(2025, 6, 1), date(2025, 12, 31)]
+    >>> seasons = create_seasons_from_dates(dates)
+    >>> for s in sorted(seasons):
+    ...     print(f"{s.name}: {s.duration_months()} months")
+    01 to 01: 1 months in 2025  # Jan (single month)
+    02 to 05: 4 months in 2025  # Feb - May (gap)
+    06 to 06: 1 months in 2025  # Jun (single month)
+    07 to 12: 6 months in 2025  # Jul - Dec (gap)
+
+    Consecutive dates (no gaps):
+
+    >>> dates = [date(2025, 1, 1), date(2025, 2, 1), date(2025, 3, 1)]
+    >>> seasons = create_seasons_from_dates(dates)
+    >>> len(seasons)
+    4  # Three 1-month Seasons + one multi-month Season for rest of year
+
+    See Also
+    --------
+    Season : The month(s)-of-year range structure created by this function
+    create_daytypes_from_dates : Analogous function for creating day(s)-of-month(s) ranges
+    create_timebrackets_from_times : Analogous function for creating time-of-day ranges
+    """
+    seasons = set()
+    
+    unique_months = sorted(set(d.month for d in dates))
+
+    # add start of year boundary
+    if unique_months[0] != 1:
+        seasons.add(Season(
+            month_start=1,
+            month_end=unique_months[0] - 1
+        )) # min 1 month, max 11 months if dates[0].month = 12
+    
+    for i in range(len(unique_months)):
+        # add each unique month as one season
+        seasons.add(Season(
+            month_start=unique_months[i],
+            month_end=unique_months[i]
+        )) # 1 month
+
+        # if next month is not consecutive
+        if unique_months[i+1] > unique_months[i] + 1:
+            # add group of missing months as one season
+            seasons.add(Season(
+                month_start=unique_months[i] + 1,
+                month_end=unique_months[i+1] - 1
+            ))
+    
+    # add end of year boundary
+    if unique_months[-1] != 12:
+        seasons.add(Season(
+            month_start=unique_months[-1] + 1,
+            month_end=12
+        )) # min 1 month, max 11 months if dates[-1].month = 1
+    
+    return seasons
+
+
 def create_daytypes_from_dates(dates: List[date]) -> set[DayType]:
     """
     Create non-overlapping DayType objects from a list of dates.
     
     Takes a list of calendar dates and partitions the year into non-overlapping
-    day-of-year ranges. Each input date represents a SINGLE DAY DayType, with
-    gaps between dates filled by range DayTypes. Start and end of year boundaries
-    are handled automatically.
+    day(s)-of-month(s) ranges. Each input date represents a SINGLE DAY DayType, with
+    gaps between dates filled by multi-day DayTypes. Start and end of month boundaries
+    are handled automatically. Maximum duration of 7 days is enforced in DayType
+    constructor.
     
     Parameters
     ----------
     dates : List[date]
         List of datetime.date objects representing specific days of interest.
-        Dates will be normalized to year 2000 (leap year) and sorted automatically.
-        If January 1 or December 31 are not included, boundary DayTypes will be
+        If the first or last day of a month are not included, boundary DayTypes will be
         added automatically.
     
     Returns
     -------
     Set[DayType]
-        Set of DayType objects that partition the year (Jan 1 - Dec 31).
+        Set of DayType objects that partition a month.
         Includes:
         
         - Single-day DayTypes for each input date
-        - Range DayTypes for gaps between consecutive dates
-        - Boundary DayTypes for start/end of year if needed
+        - Multi-day DayTypes for gaps between consecutive dates
+        - Boundary DayTypes for start/end of month if needed
     
     Notes
     -----
     Algorithm details:
     
-    - All dates are normalized to year 2000 (leap year) for maximum inclusivity
+    - All dates are normalized to month January for maximum inclusivity (31 days)
     - Each input date becomes a 1-day DayType
-    - Non-consecutive dates are separated by range DayTypes covering the gap
-    - Start-of-year (Jan 1) and end-of-year (Dec 31) boundaries are added if missing
-    - The resulting DayTypes form a complete, non-overlapping partition of the year
+    - Non-consecutive dates are separated by multi-day DayTypes covering the gap
+    - Start-of-month (1st day) and end-of-month (last day) boundaries are added if missing
+    - The resulting DayTypes form a complete, non-overlapping partition of a month
     
-    The function ensures complete coverage of all 365/366 days with no gaps or overlaps.
+    The function ensures complete coverage of all 28/29/30/31 days with no gaps or overlaps.
     
     Examples
     --------
@@ -145,308 +245,110 @@ def create_daytypes_from_dates(dates: List[date]) -> set[DayType]:
     >>> dates = [date(2025, 1, 1), date(2025, 6, 1), date(2025, 12, 31)]
     >>> daytypes = create_daytypes_from_dates(dates)
     >>> for dt in sorted(daytypes):
-    ...     print(f"{dt.name}: {dt.duration_days(2025)} days in 2025")
-    01-01 to 01-01: 1 days in 2025  # Jan 1 (single day)
-    01-02 to 05-31: 150 days in 2025  # Jan 2 - May 31 (gap)
-    06-01 to 06-01: 1 days in 2025  # Jun 1 (single day)
-    06-02 to 12-30: 212 days in 2025  # Jun 2 - Dec 30 (gap)
-    12-31 to 12-31: 1 days in 2025  # Dec 31 (single day)
+    ...     for y in set(d.year for d in dates):
+    ...         for m in set(d.month for d in dates):
+    ...             print(f"{dt.name}: {dt.duration_days(y, m)} days in {y}-{m:02d}")
+    ...         print("---")
+    01 to 01: 1 days in 2025-01  # Jan 1 (single day)
+    02 to 08: 7 days in 2025-01  # Jan 2 - Jan 8 (gap)
+    09 to 15: 7 days in 2025-01  # Jan 9 - Jan 15 (gap)
+    16 to 22: 7 days in 2025-01  # Jan 16 - Jan 22 (gap)
+    23 to 29: 7 days in 2025-01  # Jan 23 - Jan 29 (gap)
+    30 to 30: 1 days in 2025-01  # Jan 30 - Jan 30 (gap)
+    31 to 31: 1 days in 2025-01  # Jan 31 - Jan 31 (single day)
+    ---
+    01 to 01: 1 days in 2025-06  # Jun 1 (single day)
+    02 to 08: 7 days in 2025-06  # Jun 2 - Jun 8 (gap)
+    09 to 15: 7 days in 2025-06  # Jun 9 - Jun 15 (gap)
+    16 to 22: 7 days in 2025-06  # Jun 16 - Jun 22 (gap)
+    23 to 29: 7 days in 2025-06  # Jun 23 - Jun 29 (gap)
+    30 to 31: 1 days in 2025-06  # Jun 30 - Jun 30 (gap)
+    31 to 31: 0 days in 2025-06  # Jun 31 - Jun 31 (non-existent day, zero duration)
+    ---
+    01 to 01: 1 days in 2025-12  # Dec 1 (single day)
+    02 to 08: 7 days in 2025-12  # Dec 2 - Dec 8 (gap)
+    09 to 15: 7 days in 2025-12  # Dec 9 - Dec 15 (gap)
+    16 to 22: 7 days in 2025-12  # Dec 16 - Dec 22 (gap)
+    23 to 29: 7 days in 2025-12  # Dec 23 - Dec 29 (gap)
+    30 to 30: 1 days in 2025-12   # Dec 30 - Dec 30 (gap)
+    31 to 31: 1 days in 2025-12   # Dec 31 - Dec 31 (single day)
+    ---
     
     Consecutive dates (no gaps):
     
     >>> dates = [date(2025, 1, 1), date(2025, 1, 2), date(2025, 1, 3)]
     >>> daytypes = create_daytypes_from_dates(dates)
     >>> len(daytypes)
-    4  # Three 1-day DayTypes + one range for rest of year
+    7 # Three 1-day DayTypes + four multi-day DayTypes for rest of month,
+    # each with max duration of 7 days, i.e. 04 to 10, 11 to 17, 18 to 24, 25 to 31
     
     Handles leap years:
     
     >>> dates = [date(2024, 2, 29)]  # Leap day
     >>> daytypes = create_daytypes_from_dates(dates)
     >>> dt_feb29 = [dt for dt in daytypes if dt.month_start == 2 and dt.day_start == 29][0]
-    >>> dt_feb29.duration_days(2024)  # Leap year
+    >>> dt_feb29.duration_days(2024, 2)  # Leap year
     1
-    >>> dt_feb29.duration_days(2025)  # Non-leap year
+    >>> dt_feb29.duration_days(2025, 2)  # Non-leap year
     0
     
     See Also
     --------
-    DayType : The day-of-year range structure created by this function
+    DayType : The day(s)-of-month(s) range structure created by this function
+    create_seasons_from_dates : Analogous function for creating month(s)-of-year ranges
     create_timebrackets_from_times : Analogous function for creating time-of-day ranges
     """
     daytypes = set()
-    year = 2000 # use leap year for most inclusive daytype definitions
 
-    # Set same year for all dates to get highest resolution daytypes
-    dates = sorted(set(date(year, d.month, d.day) for d in dates))
+    unique_days = sorted(set(d.day for d in dates))
 
-    # Add start of year boundary
-    start_of_year = date(year, 1, 1)
+    # add start of month boundary
+    if unique_days[0] != 1:
+        start_day = 1
+        end_day = min(start_day + 6, unique_days[0] - 1) # max 6 days to enforce max duration of 7 days in DayType
+        while end_day < unique_days[0] and start_day <= end_day:
+            daytypes.add(DayType(
+                day_start=start_day,
+                day_end=end_day
+            )) # min 1 day, max 7 days
+            start_day = end_day + 1
+            # until and including day before first unique day
+            end_day = min(start_day + 6, unique_days[0] - 1)
 
-    if dates[0] != start_of_year:
-        end_date = dates[0] - timedelta(days=1)
+    for i in range(len(unique_days)):
+        # add each unique day as one daytype
         daytypes.add(DayType(
-            month_start=start_of_year.month,
-            day_start=start_of_year.day,
-            month_end=end_date.month,
-            day_end=end_date.day
-        )) # min 1 day, max 364/5 days if dates[0] = Dec 31
-    else:
-        daytypes.add(DayType(
-            month_start=start_of_year.month,
-            day_start=start_of_year.day,
-            month_end=dates[0].month,
-            day_end=dates[0].day
+            day_start=unique_days[i],
+            day_end=unique_days[i]
         )) # 1 day
-
-    for i in range(len(dates)-1):
-        # Add each date as one daytype
-        daytypes.add(DayType(
-            month_start=dates[i].month,
-            day_start=dates[i].day,
-            month_end=dates[i].month,
-            day_end=dates[i].day
-        )) # 1 day
-
-        start_date = dates[i] + timedelta(days=1)
 
         # if next date is not consecutive
-        if dates[i+1] > start_date:
-            end_date = dates[i+1] - timedelta(days=1)
-            # add group of missing dates as one daytype
+        if unique_days[i+1] > unique_days[i] + 1:
+            # add group of missing days as one daytype, with max duration of 7 days
+            start_day = unique_days[i] + 1
+            end_day = min(start_day + 6, unique_days[i+1] - 1) # max 6 days to enforce max duration of 7 days in DayType
+            while end_day < unique_days[i+1] and start_day <= end_day:
+                daytypes.add(DayType(
+                    day_start=start_day,
+                    day_end=end_day
+                )) # min 1 day, max 7 days
+                start_day = end_day + 1
+                # until and including day before next unique day
+                end_day = min(start_day + 6, unique_days[i+1] - 1)
+
+    # add end of month boundary
+    if dates[-1] != 31:
+        start_day = unique_days[-1] + 1
+        end_day = min(start_day + 6, 31) # max 6 days to enforce max duration of 7 days in DayType
+        while end_day <= 31 and start_day <= end_day:
             daytypes.add(DayType(
-                month_start=start_date.month,
-                day_start=start_date.day,
-                month_end=end_date.month,
-                day_end=end_date.day
-            )) # min 1 day, max 363/4 days if dates[0] = Jan 01, dates[-1] = Dec 31
-    
-    # Add final date as one daytype
-    daytypes.add(DayType(
-        month_start=dates[-1].month,
-        day_start=dates[-1].day,
-        month_end=dates[-1].month,
-        day_end=dates[-1].day
-    )) # 1 day
-
-    # Add end of year boundary
-    end_of_year = date(year, 12, 31)
-
-    if dates[-1] != end_of_year:
-        end_date = dates[-1] + timedelta(days=1)
-        daytypes.add(DayType(
-            month_start=end_date.month,
-            day_start=end_date.day,
-            month_end=end_of_year.month,
-            day_end=end_of_year.day
-        )) # min 1 day, max 364/5 days if dates[-1] = Jan 01
+                day_start=start_day,
+                day_end=end_day
+            )) # min 1 day, max 7 days
+            start_day = end_day + 1
+            end_day = min(start_day + 6, 31)
 
     return daytypes
-
-
-def create_endpoints(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> List[pd.Timestamp]:
-    """
-    Create extended snapshot endpoint list including year boundaries.
-    
-    Takes PyPSA snapshots and augments them with start-of-year and end-of-year
-    timestamps for each year present in the snapshots. These endpoints are used
-    to properly align snapshots with OSeMOSYS timeslice boundaries.
-    
-    Parameters
-    ----------
-    snapshots : pd.DatetimeIndex or pd.Index
-        PyPSA snapshot timestamps. Will be converted to DatetimeIndex if needed.
-    
-    Returns
-    -------
-    List[pd.Timestamp]
-        Sorted list of unique timestamps including:
-        
-        - All original snapshot timestamps
-        - Start of year (Jan 1 00:00:00) for each year in snapshots
-        - End of year (Dec 31 23:59:59.999999) for each year in snapshots
-        
-        Duplicates are removed automatically.
-    
-    Notes
-    -----
-    This function is used internally by create_map() to ensure proper handling
-    of snapshot periods that span year boundaries. The year boundaries allow
-    accurate calculation of snapshot durations when mapping to timeslices.
-    
-    Examples
-    --------
-    >>> snapshots = pd.DatetimeIndex([
-    ...     '2025-03-15 12:00',
-    ...     '2025-09-20 08:00',
-    ...     '2026-02-10 16:00'
-    ... ])
-    >>> endpoints = create_endpoints(snapshots)
-    >>> print([str(ep) for ep in endpoints])
-    ['2025-01-01 00:00:00',  # Added: start of 2025
-     '2025-03-15 12:00:00',  # Original snapshot
-     '2025-09-20 08:00:00',  # Original snapshot
-     '2025-12-31 23:59:59.999999',  # Added: end of 2025
-     '2026-01-01 00:00:00',  # Added: start of 2026
-     '2026-02-10 16:00:00',  # Original snapshot
-     '2026-12-31 23:59:59.999999']  # Added: end of 2026
-    
-    See Also
-    --------
-    create_map : Uses endpoints for snapshot-to-timeslice mapping
-    """
-    snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()    
-    years = sorted(snapshots.year.unique().tolist())
-
-    endpoints = []
-    for year in years:
-        start_of_year = pd.Timestamp.combine(date(year, 1, 1), time(0, 0, 0))
-        end_of_year = pd.Timestamp.combine(date(year, 12, 31), ENDOFDAY)
-        endpoints.append(start_of_year)
-        endpoints.append(end_of_year)
-
-    endpoints = list(snapshots) + endpoints
-    endpoints = sorted(set(endpoints))
-    return endpoints
-
-
-def create_map(snapshots: Union[pd.DatetimeIndex, pd.Index],
-               timeslices: List[Timeslice]) -> Dict[pd.Timestamp, List[Tuple[int, Timeslice]]]:
-    """
-    Map each PyPSA snapshot to corresponding OSeMOSYS (year, timeslice) pairs.
-    
-    Creates a mapping from PyPSA's sequential snapshot representation to OSeMOSYS's
-    hierarchical timeslice structure. Each snapshot is mapped to one or more
-    (year, timeslice) tuples, accounting for snapshots that may represent periods
-    spanning multiple timeslices or years.
-    
-    Parameters
-    ----------
-    snapshots : pd.DatetimeIndex or pd.Index
-        PyPSA snapshot timestamps. Each snapshot represents a period that extends
-        until the next snapshot (or end of year for the final snapshot).
-    timeslices : List[Timeslice]
-        List of OSeMOSYS Timeslice objects representing the hierarchical time
-        structure (season/daytype/dailytimebracket combinations).
-    
-    Returns
-    -------
-    Dict[pd.Timestamp, List[Tuple[int, Timeslice]]]
-        Dictionary mapping each snapshot timestamp to a list of (year, timeslice)
-        tuples that fall within that snapshot's valid period. A snapshot may map to:
-        
-        - Single timeslice: snapshot period perfectly aligns with one timeslice
-        - Multiple timeslices: snapshot period spans several timeslices
-        - Multiple years: snapshot period crosses year boundary
-    
-    Raises
-    ------
-    ValueError
-        If total duration of mapped timeslices doesn't match the snapshot period
-        duration (within 1 second tolerance). This indicates structural mismatch
-        between PyPSA snapshots and OSeMOSYS timeslices.
-    
-    Notes
-    -----
-    Algorithm:
-    
-    1. Each snapshot's valid period extends from its timestamp to the next snapshot
-       (or to end-of-year for the final snapshot in each year)
-    2. For each snapshot period, find all timeslices that fall entirely within it
-    3. Validate that timeslice durations sum to snapshot period duration
-    4. Skip timeslices with zero duration (e.g., Feb 29 in non-leap years)
-    
-    The validation ensures lossless conversion between PyPSA and OSeMOSYS time
-    representations.
-    
-    Examples
-    --------
-    Simple case - one snapshot per timeslice:
-    
-    >>> snapshots = pd.DatetimeIndex(['2025-01-01', '2025-06-01'])
-    >>> # Assume timeslices cover Jan-May and Jun-Dec
-    >>> mapping = create_map(snapshots, timeslices)
-    >>> mapping[pd.Timestamp('2025-01-01')]
-    [(2025, Timeslice(X_01-01 to 05-31_DAY))]
-    >>> mapping[pd.Timestamp('2025-06-01')]
-    [(2025, Timeslice(X_06-01 to 12-31_DAY))]
-    
-    Complex case - snapshot spans multiple timeslices:
-    
-    >>> snapshots = pd.DatetimeIndex(['2025-01-01 00:00', '2025-01-02 00:00'])
-    >>> # Assume hourly timeslices
-    >>> mapping = create_map(snapshots, timeslices)
-    >>> len(mapping[pd.Timestamp('2025-01-01')])
-    24  # Maps to 24 hourly timeslices
-    
-    Error case - duration mismatch:
-    
-    >>> # If timeslices don't cover the full snapshot period
-    >>> mapping = create_map(snapshots, incomplete_timeslices)
-    ValueError: Mismatch! snapshot duration = 1 days, timeslice duration = 20 hours
-    
-    See Also
-    --------
-    to_timeslices : Uses this function for PyPSA → OSeMOSYS conversion
-    create_endpoints : Helper for handling year boundaries
-    Timeslice.duration_hours : Used to calculate timeslice durations
-    """
-    snapshot_to_timeslice = {}
-    snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()   
-    # Data in each snapshot is valid until the next one
-    valid_until = list(snapshots)
-    # Data in last snapshot is valid until the end of the last year
-    valid_until += [pd.Timestamp.combine(date(snapshots[-1].year, 12, 31), ENDOFDAY)]
-    # Add start of year and end of year endpoints for each year in snapshots
-    endpoints = create_endpoints(snapshots)
-
-    for i in range(len(valid_until) - 1):
-        # Get annual lower and upper bounds of valid_until period
-        i_lower = endpoints.index(valid_until[i])
-        i_upper = endpoints.index(valid_until[i+1])
-        segment = endpoints[i_lower:i_upper+1]
-        # Get valid_years that are represented in snapshots
-        valid_years = set([e.year for e in segment])
-
-        # List all timeslices between lower and upper bounds
-        idx_list, total_timedelta = [], timedelta()
-        for j, ts in enumerate(timeslices):
-            for y in valid_years:
-                # Skip if timeslice doesn't exist in this year (e.g., Feb 29 in non-leap year)
-                if ts.daytype.duration_days(y) == 0:
-                    continue
-                
-                # Get start and end datetime based on timeslice definition and each valid_year
-                start_date, end_date = ts.daytype.to_dates(y)
-                start_time = pd.Timestamp.combine(start_date, ts.dailytimebracket.hour_start)
-                end_time = pd.Timestamp.combine(end_date, ts.dailytimebracket.hour_end)
-                
-                # Calculate timeslice duration: duration_days * duration_hours
-                duration_days = ts.daytype.duration_days(y)
-                duration_hours = ts.dailytimebracket.duration_hours()
-                timeslice_timedelta = timedelta(hours=duration_days * duration_hours)
-                
-                # Check if timeslice is within valid_until period
-                if start_time >= valid_until[i] and end_time <= valid_until[i+1]:
-                    idx_list.append((y, j))
-                    total_timedelta += timeslice_timedelta
-
-        # Compare with timedelta represented by snapshot
-        snapshot_timedelta = timedelta()
-        for j in range(len(segment)-1):
-            if segment[j+1].year == segment[j].year:
-                snapshot_timedelta += segment[j+1] - segment[j]
-
-        diff_seconds = abs((snapshot_timedelta - total_timedelta).total_seconds())
-        if diff_seconds > 1:
-            raise ValueError(
-                f"Mismatch! snapshot duration = {snapshot_timedelta}, timeslice duration = {total_timedelta}"
-                f"\n(year, timeslice) pairs = {[(y, timeslices[j]) for (y, j) in idx_list]}"
-                f"\n(year, index) pairs = {idx_list}"
-            )
-        snapshot_to_timeslice[snapshots[i]] = [(y, timeslices[j]) for (y, j) in idx_list]
-
-    return snapshot_to_timeslice
 
 
 def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp], List[datetime]]) -> TimesliceResult:
@@ -459,7 +361,7 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     
     Parameters
     ----------
-    snapshots : pd.DatetimeIndex or pd.Index
+    snapshots : pd.DatetimeIndex or pd.Index or List[pd.Timestamp] or List[datetime]
         PyPSA snapshot timestamps. Must contain datetime-like values that can be
         converted to pd.DatetimeIndex. The function extracts unique dates and times
         to construct the OSeMOSYS time structure.
@@ -490,16 +392,16 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     Conversion algorithm:
     
     1. **Extract years**: Identify unique years from snapshot timestamps
-    2. **Create DayTypes**: Group snapshot dates into non-overlapping day-of-year ranges
-    3. **Create DailyTimeBrackets**: Group snapshot times into non-overlapping time-of-day ranges
-    4. **Form Timeslices**: Create cartesian product of DayTypes × DailyTimeBrackets
-    5. **Map snapshots**: Associate each snapshot with corresponding (year, timeslice) pairs
+    2. **Create Seasons**: Group snapshot dates into non-overlapping month(s)-of-year ranges
+    3. **Create DayTypes**: Group snapshot dates into non-overlapping day(s)-of-month(s) ranges
+    4. **Create DailyTimeBrackets**: Group snapshot times into non-overlapping time-of-day ranges
+    5. **Form Timeslices**: Create cartesian product of Seasons x DayTypes × DailyTimeBrackets
     6. **Validate**: Ensure timeslices partition each year completely (sum to 8760/8784 hours)
     
     The resulting structure uses:
     
-    - Placeholder season 'X' (PyPSA snapshots don't inherently contain seasonal structure)
-    - DayTypes capturing day-of-year granularity from snapshot dates
+    - Seasons capturing month(s)-of-year granularity from snapshot dates
+    - DayTypes capturing day(s)-of-month(s) granularity from snapshot dates
     - DailyTimeBrackets capturing time-of-day granularity from snapshot times
     
     Performance considerations:
@@ -514,7 +416,9 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     >>> snapshots = pd.date_range('2025-01-01', periods=8760, freq='H')
     >>> result = to_timeslices(snapshots)
     >>> print(f"Created {len(result.timeslices)} timeslices")
-    Created 8760 timeslices
+    Created 8928 timeslices
+    # Creates 12 Seasons, 31 DayTypes, 24 DailyTimeBrackets
+    # Note that some Timeslices will have no duration
     >>> print(f"Years: {result.years}")
     Years: [2025]
     >>> result.validate_coverage()
@@ -528,12 +432,16 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     ...     # ... continue for full year
     ... ])
     >>> result = to_timeslices(snapshots)
+    >>> print(f"Years: {result.years}")
+    Years: [2025]
+    >>> print(f"Seasons: {len(result.seasons)}")
+    Seasons: 12  # One per month
     >>> print(f"DayTypes: {len(result.daytypes)}")
-    DayTypes: 365  # One per day
+    DayTypes: 31  # One per day in longest month
     >>> print(f"DailyTimeBrackets: {len(result.dailytimebrackets)}")
-    DailyTimeBrackets: 2  # 06:00-18:00 and 18:00-06:00
+    DailyTimeBrackets: 3  # 00:00 to 06:00, 06:00 to 18:00, 18:00-ENDOFDAY
     >>> print(f"Timeslices: {len(result.timeslices)}")
-    Timeslices: 730  # 365 days × 2 brackets
+    Timeslices: 1116
     
     Export to OSeMOSYS CSV files:
     
@@ -544,21 +452,21 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     >>> for filename, df in csv_dict.items():
     ...     df.to_csv(f'osemosys_scenario/{filename}.csv', index=False)
     >>> print(f"Created {len(csv_dict)} CSV files")
-    Created 7 CSV files
+    Created 8 CSV files
     
     Multi-year conversion:
     
-    >>> snapshots = pd.date_range('2025-01-01', '2027-12-31', freq='D')
+    >>> snapshots = pd.date_range('2026-01-01', '2028-12-31', freq='D')
     >>> result = to_timeslices(snapshots)
     >>> print(f"Years: {result.years}")
-    Years: [2025, 2026, 2027]
+    Years: [2026, 2027, 2028]
     >>> for year in result.years:
-    ...     timeslices = result.get_timeslices_for_year(year)
+    ...     timeslices = result.timeslices
     ...     total_hours = sum(ts.duration_hours(year) for ts in timeslices)
     ...     print(f"{year}: {total_hours:.0f} hours")
-    2025: 8760 hours
     2026: 8760 hours
     2027: 8760 hours
+    2028: 8784 hours
     
     Handle mapping for downstream use:
     
@@ -575,10 +483,11 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     --------
     to_snapshots : Convert OSeMOSYS timeslices to PyPSA snapshots (inverse operation)
     TimesliceResult : Container class for conversion results
-    create_daytypes_from_dates : Helper for creating day-of-year ranges
+    create_seasons_from_dates : Helper for creating month(s)-of-year ranges
+    create_daytypes_from_dates : Helper for creating day(s)-of-month(s) ranges
     create_timebrackets_from_times : Helper for creating time-of-day ranges
-    create_map : Helper for mapping snapshots to timeslices
-    DayType : Day-of-year range structure
+    Season : Month(s)-of-year range structure
+    DayType : Day(s)-of-month(s) range structure
     DailyTimeBracket : Time-of-day range structure
     Timeslice : Combined temporal slice structure
     """
@@ -596,12 +505,13 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     years = sorted(snapshots.year.unique().tolist())
     
     # 2. Initialize containers
+    seasons: Set[Season] = set()
     daytypes: Set[DayType] = set()
     dailytimebrackets: Set[DailyTimeBracket] = set()
-    seasons: Set[str] = set("X") # snapshots to timeslices never creates seasons
     
-    # 3. Remove time component and create daytypes from dates
+    # 3. Remove time component and create seasons and daytypes from dates
     unique_dates = sorted(set(ts.date() for ts in snapshots))
+    seasons = create_seasons_from_dates(unique_dates)
     daytypes = create_daytypes_from_dates(unique_dates)
 
     # 4. Remove date component and create dailytimebrackets from times
@@ -610,17 +520,15 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     
     # 5. Create timeslice for each combination
     timeslices = []
-    for dt in sorted(daytypes):
-        for dtb in sorted(dailytimebrackets):
-            ts = Timeslice(
-                season="X",
-                daytype=dt,
-                dailytimebracket=dtb,
-            )
-            timeslices.append(ts)
-    
-    # 6. Map snapshots to timeslices
-    map = create_map(snapshots, timeslices)
+    for s in sorted(seasons):
+        for dt in sorted(daytypes):
+            for dtb in sorted(dailytimebrackets):
+                    ts = Timeslice(
+                        season=s,
+                        daytype=dt,
+                        dailytimebracket=dtb,
+                    )
+                    timeslices.append(ts)
     
     result = TimesliceResult(
         years=years,
@@ -628,7 +536,6 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
         daytypes=daytypes,
         dailytimebrackets=dailytimebrackets,
         timeslices=timeslices,
-        snapshot_to_timeslice=map,
     )
 
     if not result.validate_coverage():
@@ -638,8 +545,7 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
 
     return result
 
-def to_snapshots(source: ScenarioData,
-                 multi_investment_periods: bool = True) -> SnapshotResult:
+def to_snapshots(source: ScenarioData) -> SnapshotResult:
     """
     Convert OSeMOSYS hierarchical timeslice structure to PyPSA snapshots.
     
@@ -655,14 +561,6 @@ def to_snapshots(source: ScenarioData,
         - If **ScenarioData**: Uses an initialized ScenarioData object.
           Recommended when building scenarios programmatically.
 
-    multi_investment_periods : bool, default True
-        Whether to create multi-period snapshots.
-        
-        - If True: Creates MultiIndex with ('period', 'timestep') levels,
-          enabling multi-year capacity expansion modeling.
-        - If False: Creates flat Index with 'timestep' level only.
-          Requires single year in source data.
-    
     Returns
     -------
     SnapshotResult
@@ -674,11 +572,7 @@ def to_snapshots(source: ScenarioData,
     TypeError
         If source is not ScenarioData.
     ValueError
-        If multi_investment_periods=False but multiple years are present.
-    ValueError
         If snapshot weightings do not sum to correct hours per year.
-    FileNotFoundError
-        If source is str but required CSV files are missing.
     
     Examples
     --------
@@ -699,19 +593,10 @@ def to_snapshots(source: ScenarioData,
     yearsplit_df = source.time.year_split
 
     # 2. Create multi-index snapshots
-    if multi_investment_periods:
-        snapshots = pd.MultiIndex.from_product(
-            [years, timeslice_names],
-            names=['period', 'timestep']
-        )
-    else:
-        # Single period, flat index
-        if len(years) > 1:
-            raise ValueError(
-                "multi_investment_periods=False requires single year, "
-                f"got {len(years)} years"
-            )
-        snapshots = pd.Index(timeslice_names, name='timestep')
+    snapshots = pd.MultiIndex.from_product(
+        [years, timeslice_names],
+        names=['period', 'timestep']
+    )
 
     # 3. Create weightings (duration in hours)
     weightings_dict = {}
@@ -721,11 +606,7 @@ def to_snapshots(source: ScenarioData,
         fraction = row['VALUE']
         hours = fraction * hours_in_year(year)
         
-        if multi_investment_periods:
-            key = (year, timeslice)
-        else:
-            key = timeslice
-        
+        key = (year, timeslice)
         weightings_dict[key] = hours
     
     weightings = pd.Series(weightings_dict)

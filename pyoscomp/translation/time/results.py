@@ -1,13 +1,12 @@
 # pyoscomp/translation/time/results.py
 
 import pandas as pd
-from typing import List, Set, Dict, Tuple
-from dataclasses import dataclass, field
+from typing import Union, List, Set, Dict, Tuple
+from dataclasses import dataclass
 
 from ...constants import TOL, hours_in_year
-from .structures import DayType, DailyTimeBracket, Timeslice
+from .structures import Season, DayType, DailyTimeBracket, Timeslice
 
-TimesliceMapping = Dict[pd.Timestamp, List[Tuple[int, Timeslice]]]
 
 @dataclass
 class TimesliceResult:
@@ -43,14 +42,11 @@ class TimesliceResult:
     The conversion algorithm:
     
     1. Extracts unique years from snapshot timestamps
-    2. Creates DayType objects from unique dates (day-of-year ranges)
-    3. Creates DailyTimeBracket objects from unique times (time-of-day ranges)
-    4. Forms Timeslice objects as cartesian product of DayTypes × DailyTimeBrackets
-    5. Maps each snapshot to corresponding (year, timeslice) pairs
+    2. Creates Season objets from unique months or month-of-year ranges
+    3. Creates DayType objects from unique dates (day-of-month ranges)
+    4. Creates DailyTimeBracket objects from unique times (time-of-day ranges)
+    5. Forms Timeslice objects as cartesian product of Season x DayTypes × DailyTimeBrackets
     6. Validates that timeslices partition the year completely
-    
-    The resulting structure uses a placeholder season 'X' since PyPSA snapshots
-    do not inherently contain seasonal categorization.
     
     Examples
     --------
@@ -59,7 +55,7 @@ class TimesliceResult:
     >>> snapshots = pd.date_range('2025-01-01', periods=8760, freq='H')
     >>> result = to_timeslices(snapshots)
     >>> print(len(result.timeslices))
-    365  # One timeslice per day (if hourly resolution)
+    8760  # One timeslice per hour
     >>> result.validate_coverage()
     True
     
@@ -71,9 +67,12 @@ class TimesliceResult:
     ... ])
     >>> result = to_timeslices(snapshots)
     >>> print(len(result.daytypes))
-    4  # Jan 1-Jun 30, Jul 1, Jul 2-Dec 31, and two specific days
+    # Seasons: 01 to 01, 02 to 06, 07 to 07, 08 to 12
+    # DayTypes: 01 to 01, 02 to 31
+    # DailyTimeBrackets: 00:00 to 12:00, 12:00 to 24:00
+    16  # 4*2*2 = 16 timeslices
     >>> print(len(result.dailytimebrackets))
-    2  # 00:00-12:00 and 12:00-24:00
+    2  # 00:00 to 12:00 and 12:00 to 24:00
     
     Export to CSV:
     
@@ -86,16 +85,16 @@ class TimesliceResult:
     --------
     to_snapshots : Convert OSeMOSYS timeslices to PyPSA snapshots (inverse operation)
     TimesliceResult : Container class for conversion results
-    DayType : Day-of-year range structure
+    Season : Month-of-year range structure
+    DayType : Day-of-month range structure
     DailyTimeBracket : Time-of-day range structure
     Timeslice : Combined temporal slice structure
     """
     years: List[int]
+    seasons: Set[Season]
     daytypes: Set[DayType]
     dailytimebrackets: Set[DailyTimeBracket]
     timeslices: List[Timeslice]
-    snapshot_to_timeslice: Dict[pd.Timestamp, List[Tuple[int, Timeslice]]]
-    seasons: Set[str] = field(default_factory=lambda: set("X"))  # Placeholder season
 
     def validate_coverage(self) -> bool:
         """Validate that timeslices partition the year completely."""
@@ -108,29 +107,6 @@ class TimesliceResult:
             if abs(total_hours - expected_hours) > TOL:
                 return False
         return True
-    
-    def get_timeslices_for_year(self, year: int) -> List[Timeslice]:
-        """
-        Get all unique timeslices used in a specific year.
-        
-        Parameters
-        ----------
-        year : int
-            The year to query.
-        
-        Returns
-        -------
-        List[Timeslice]
-            List of timeslice objects that appear in the specified year.
-            May be fewer than total timeslices if some don't exist in that year
-            (e.g., Feb 29 timeslices in non-leap years).
-        """
-        timeslices_in_year = set()
-        for ts_list in self.snapshot_to_timeslice.values():
-            for y, ts in ts_list:
-                if y == year:
-                    timeslices_in_year.add(ts)
-        return list(timeslices_in_year)
     
     def export(self) -> Dict[str, pd.DataFrame]:
         """
@@ -151,6 +127,7 @@ class TimesliceResult:
             - 'TIMESLICE': DataFrame with columns ['VALUE']
             - 'YearSplit': DataFrame with columns ['TIMESLICE', 'YEAR', 'VALUE']
             - 'DaySplit': DataFrame with columns ['TIMESLICE', 'YEAR', 'VALUE']
+            - 'DaysInDayType': DataFrame with columns ['SEASON', 'DAYTYPE', 'YEAR', 'VALUE']
         
         Examples
         --------
@@ -201,6 +178,24 @@ class TimesliceResult:
                 })
         result[f'DaySplit'] = pd.DataFrame(day_split_rows)
         
+        # DaysInDayType - number of days for each daytype within one week
+        # (equivalent to the number of days in that daytype for that season and year as DayType construction enforces max 7 days per daytype)
+        didt_rows = []
+        for year in self.years:
+            for season in self.seasons:
+                for daytype in self.daytypes:
+                    # Calculate number of days in this daytype for this season and year
+                    days_in_season_year = 0
+                    for m in range(season.month_start, season.month_end + 1):
+                        days_in_season_year += daytype.duration_days(year, m)
+                    didt_rows.append({
+                        'SEASON': season.name,
+                        'DAYTYPE': daytype.name,
+                        'YEAR': year,
+                        'VALUE': days_in_season_year
+                    })
+        result[f'DaysInDayType'] = pd.DataFrame(didt_rows)
+
         return result
     
     def to_csv(self, output_dir: str) -> None:
@@ -238,10 +233,9 @@ class SnapshotResult:
     ----------
     years : List[int]
         List of model years (investment periods).
-    snapshots : pd.MultiIndex or pd.Index
-        PyPSA snapshot labels. If multi_investment_periods=True, this is a
-        MultiIndex with levels ('period', 'timestep'). Otherwise, a flat Index
-        with level 'timestep'.
+    snapshots : pd.MultiIndex
+        PyPSA snapshot labels.
+        This is a MultiIndex with levels ('period', 'timestep') for capacity expansion.
     weightings : pd.Series
         Duration in hours for each snapshot. Index is aligned with snapshots.
     timeslice_names : List[str]
@@ -255,7 +249,7 @@ class SnapshotResult:
     >>> result.apply_to_network(network)
     """
     years: List[int]
-    snapshots: pd.MultiIndex
+    snapshots: Union[pd.MultiIndex, pd.Index, pd.DatetimeIndex, pd.Timestamp]
     weightings: pd.Series # Index aligned with snapshots
     timeslice_names: List[str]
 
@@ -268,21 +262,10 @@ class SnapshotResult:
         bool
             True if total hours match expected hours per year within tolerance.
         """
-        # Handle both MultiIndex and flat Index
-        if isinstance(self.snapshots, pd.MultiIndex):
-            # Multi-investment periods: group by year
-            for year in self.years:
-                year_mask = self.snapshots.get_level_values('period') == year
-                total_hours = self.weightings[year_mask].sum()
-                expected_hours = hours_in_year(year)
-                if abs(total_hours - expected_hours) > TOL:
-                    return False
-        else:
-            # Single period: check total
-            if len(self.years) != 1:
-                raise ValueError("Single-period snapshots must have exactly one year")
-            total_hours = self.weightings.sum()
-            expected_hours = hours_in_year(self.years[0])
+        for year in self.years:
+            year_mask = self.snapshots.get_level_values('period') == year
+            total_hours = self.weightings[year_mask].sum()
+            expected_hours = hours_in_year(year)
             if abs(total_hours - expected_hours) > TOL:
                 return False
         return True
