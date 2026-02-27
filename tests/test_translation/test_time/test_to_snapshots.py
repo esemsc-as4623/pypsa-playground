@@ -119,7 +119,7 @@ class TestSnapshotResultValidation:
         """Test validation passes for correctly weighted single year."""
         years = [2025]
         timeslices = ['Winter_Day', 'Winter_Night', 'Summer_Day', 'Summer_Night']
-        snapshots = pd.Index(timeslices, name='timestep')
+        snapshots = pd.MultiIndex.from_product([years, timeslices], names=['period', 'timestep'])
 
         total_hours = hours_in_year(2025)
         weightings = pd.Series(
@@ -139,7 +139,7 @@ class TestSnapshotResultValidation:
         """Test validation fails for incorrectly weighted single year."""
         years = [2025]
         timeslices = ['Winter_Day', 'Winter_Night']
-        snapshots = pd.Index(timeslices, name='timestep')
+        snapshots = pd.MultiIndex.from_product([years, timeslices], names=['period', 'timestep'])
 
         total_hours = hours_in_year(2025)
         weightings = pd.Series(
@@ -183,7 +183,7 @@ class TestSnapshotResultValidation:
         """Test validation handles leap year correctly (8784 hours)."""
         years = [2024]
         timeslices = ['TS1', 'TS2']
-        snapshots = pd.Index(timeslices, name='timestep')
+        snapshots = pd.MultiIndex.from_product([years, timeslices], names=['period', 'timestep'])
 
         total_hours = hours_in_year(2024)
         assert total_hours == 8784
@@ -201,12 +201,12 @@ class TestSnapshotResultValidation:
         )
         assert result.validate_coverage()
 
-    def test_validate_coverage_raises_on_single_index_multiple_years(self):
+    def test_validate_coverage_multiple_years(self):
         """Test that single-period index with multiple years raises error."""
         years = [2025, 2026]
         timeslices = ['TS1']
-        snapshots = pd.Index(timeslices, name='timestep')
-        weightings = pd.Series([8760.0], index=snapshots)
+        snapshots = pd.MultiIndex.from_product([years, timeslices], names=['period', 'timestep'])
+        weightings = pd.Series([8760.0] * 2, index=snapshots)
 
         result = SnapshotResult(
             years=years,
@@ -214,12 +214,7 @@ class TestSnapshotResultValidation:
             weightings=weightings,
             timeslice_names=timeslices,
         )
-
-        with pytest.raises(
-            ValueError,
-            match="Single-period snapshots must have exactly one year",
-        ):
-            result.validate_coverage()
+        assert result.validate_coverage()
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +234,7 @@ class TestToSnapshotsFromScenarioData:
             brackets={"Day": 12, "Night": 12},
         )
 
-        result = to_snapshots(data, multi_investment_periods=True)
+        result = to_snapshots(data)
 
         assert isinstance(result, SnapshotResult)
         assert sorted(result.years) == sorted(years)
@@ -261,31 +256,16 @@ class TestToSnapshotsFromScenarioData:
             brackets={"Day": 12, "Night": 12},
         )
 
-        result = to_snapshots(data, multi_investment_periods=False)
+        result = to_snapshots(data)
 
         assert isinstance(result, SnapshotResult)
         assert sorted(result.years) == years
-        assert isinstance(result.snapshots, pd.Index)
-        assert result.snapshots.name == 'timestep'
+        assert isinstance(result.snapshots, pd.MultiIndex)
+        assert result.snapshots.names == ['period', 'timestep']
 
         expected_timeslices = 2 * 1 * 2
         assert len(result.snapshots) == expected_timeslices
         assert result.validate_coverage()
-
-    def test_multi_year_requires_multi_period_flag(self):
-        """Test that multi-year with single-period flag raises error."""
-        data = _make_time_scenario_data(
-            [2025, 2030],
-            seasons={"S1": 182.5, "S2": 182.5},
-            daytypes={"D1": 7},
-            brackets={"B1": 24},
-        )
-
-        with pytest.raises(
-            ValueError,
-            match="multi_investment_periods=False requires single year",
-        ):
-            to_snapshots(data, multi_investment_periods=False)
 
     def test_hourly_resolution(self):
         """Test conversion with hourly resolution (24 brackets)."""
@@ -297,7 +277,7 @@ class TestToSnapshotsFromScenarioData:
             brackets=brackets,
         )
 
-        result = to_snapshots(data, multi_investment_periods=False)
+        result = to_snapshots(data)
 
         expected = 4 * 2 * 24
         assert len(result.snapshots) == expected
@@ -313,7 +293,7 @@ class TestToSnapshotsFromScenarioData:
             brackets={"B1": 12, "B2": 12},
         )
 
-        result = to_snapshots(data, multi_investment_periods=True)
+        result = to_snapshots(data)
 
         for year in years:
             year_mask = result.snapshots.get_level_values('period') == year
@@ -351,7 +331,7 @@ class TestToSnapshotsFromCSV:
         data = self._make_scenario_data_from_yearsplit(
             years, timeslices, yearsplit,
         )
-        result = to_snapshots(data, multi_investment_periods=False)
+        result = to_snapshots(data)
 
         assert sorted(result.years) == years
         assert len(result.snapshots) == 4
@@ -369,7 +349,7 @@ class TestToSnapshotsFromCSV:
         data = self._make_scenario_data_from_yearsplit(
             years, timeslices, yearsplit,
         )
-        result = to_snapshots(data, multi_investment_periods=True)
+        result = to_snapshots(data)
 
         assert sorted(result.years) == years
         assert len(result.snapshots) == len(years) * len(timeslices)
@@ -388,10 +368,10 @@ class TestToSnapshotsFromCSV:
         data = self._make_scenario_data_from_yearsplit(
             years, timeslices, yearsplit,
         )
-        result = to_snapshots(data, multi_investment_periods=False)
+        result = to_snapshots(data)
 
-        peak_hours = result.weightings[result.snapshots == 'Peak'].iloc[0]
-        offpeak_hours = result.weightings[result.snapshots == 'OffPeak'].iloc[0]
+        peak_hours = result.weightings[result.snapshots == (2025, 'Peak')].iloc[0]
+        offpeak_hours = result.weightings[result.snapshots == (2025, 'OffPeak')].iloc[0]
 
         total_hours = hours_in_year(2025)
         assert abs(peak_hours - 0.25 * total_hours) < 1e-6
@@ -409,10 +389,10 @@ class TestToSnapshotsEdgeCases:
     def test_invalid_source_type_raises_error(self):
         """Test that non-ScenarioData input raises AttributeError."""
         with pytest.raises(AttributeError):
-            to_snapshots(123, multi_investment_periods=True)
+            to_snapshots(123)
 
         with pytest.raises(AttributeError):
-            to_snapshots(['not', 'valid'], multi_investment_periods=True)
+            to_snapshots(['not', 'valid'])
 
     def test_single_timeslice(self):
         """Test with single timeslice (entire year)."""
@@ -422,7 +402,7 @@ class TestToSnapshotsEdgeCases:
             daytypes={"All": 7},
             brackets={"All": 24},
         )
-        result = to_snapshots(data, multi_investment_periods=False)
+        result = to_snapshots(data)
 
         assert len(result.snapshots) == 1
         assert abs(result.weightings.iloc[0] - hours_in_year(2025)) < 1e-6
@@ -437,7 +417,7 @@ class TestToSnapshotsEdgeCases:
         data = _make_time_scenario_data(
             [2025], seasons, daytypes, brackets,
         )
-        result = to_snapshots(data, multi_investment_periods=False)
+        result = to_snapshots(data)
 
         expected_count = 12 * 7 * 24
         assert len(result.snapshots) == expected_count
@@ -513,7 +493,7 @@ class TestRoundTripConsistency:
             brackets={"Day": 12, "Night": 12},
         )
 
-        result = to_snapshots(data, multi_investment_periods=False)
+        result = to_snapshots(data)
 
         assert result.validate_coverage()
 
