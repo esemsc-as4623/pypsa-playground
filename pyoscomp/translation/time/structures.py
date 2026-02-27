@@ -35,7 +35,7 @@ class DailyTimeBracket:
             if self.is_full_day():
                 self.name = "DAY"
             else:
-                end_str = "24:00" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H%M')
+                end_str = "24:00" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H:%M')
                 self.name = f"{self.hour_start.strftime('%H:%M')} to {end_str}"
     
     def validate(self):
@@ -185,7 +185,7 @@ class DayType:
         if self.day_start > self.day_end:
             raise ValueError("Start day must be less than or equal to end day." \
             "Month-wrapping day types not supported.")
-        if self.day_end - self.day_start > self.max_days:
+        if (self.day_end - self.day_start) + 1 > self.max_days:
             raise ValueError(f"DayType range cannot exceed {self.max_days} days. Got {self.day_start} to {self.day_end}.")
     
     @classmethod
@@ -225,7 +225,7 @@ class DayType:
         """Check if the day range represents a single day."""
         return self.day_start == self.day_end
     
-    def to_dates(self, year: int, month: int) -> Union[Tuple[date, date], Tuple[int, int]]:
+    def to_dates(self, year: int, month: int) -> Union[Tuple[date, date], Tuple[None, None]]:
         """
         Convert to actual date objects for a specific year.
         
@@ -237,15 +237,15 @@ class DayType:
         
         Returns
         -------
-        Tuple[date, date] or Tuple[int, int]
+        Tuple[date, date] or Tuple[None, None]
             (start_date, end_date) for the specified year and month.
-            (-1, -1) if the day range is invalid for that month/year (e.g., Feb 29 in non-leap year, Apr 31, etc.).
+            (None, None) if the day range is invalid for that month/year (e.g., Feb 29 in non-leap year, Apr 31, etc.).
         """
         # Get actual maximum number of days in year and month
         max_day = days_in_month(year, month)
 
         if self.day_start > max_day:
-            return -1, -1
+            return None, None
         
         day_start = self.day_start
         day_end = min(max_day, self.day_end)
@@ -287,7 +287,7 @@ class DayType:
         assert year >= 1, "Year must be a positive integer."
         
         start, end = self.to_dates(year, month)
-        if start == -1:
+        if start is None or end is None:
             return 0
         return (end - start).days + 1  # +1 for closed interval
     
