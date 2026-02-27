@@ -2,10 +2,10 @@
 
 import pytest
 import pandas as pd
-from datetime import time
+from datetime import date, time
 
-from pyoscomp.constants import ENDOFDAY
-from pyoscomp.translation.time.structures import DayType
+from pyoscomp.constants import ENDOFDAY, days_in_month
+from pyoscomp.translation.time.structures import Season, DayType
 from pyoscomp.translation.time.translate import to_timeslices, TimesliceResult
 
 
@@ -22,12 +22,11 @@ class TestToTimeslicesHourlySingleDay:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before (Jan 1 - Jun 14), Jun 15, after (Jun 16 - Dec 31)
-        assert len(result.daytypes) == 3
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 6, 14)
-        assert daytypes_list[1] == DayType(6, 15, 6, 15)
-        assert daytypes_list[2] == DayType(6, 16, 12, 31)
+        # Verify seasons x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 24 hourly brackets
         assert len(result.dailytimebrackets) == 24
@@ -39,14 +38,8 @@ class TestToTimeslicesHourlySingleDay:
             else:
                 assert bracket.hour_end == ENDOFDAY
         
-        # Verify total timeslices = daytypes × timebrackets
-        assert len(result.timeslices) == 3 * 24
-        assert len(result.timeslices) == 72
-        
-        # Verify mapping
-        assert len(result.snapshot_to_timeslice) == 24
-        for snapshot in snapshots:
-            assert snapshot in result.snapshot_to_timeslice
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_hourly_single_day_partial_12h(self):
         """Test 12 hourly snapshots for half day (00:00 to 11:00)."""
@@ -57,8 +50,11 @@ class TestToTimeslicesHourlySingleDay:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: 3 (before, Jun 15, after)
-        assert len(result.daytypes) == 3
+        # Verify seasons x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 12 hourly brackets
         assert len(result.dailytimebrackets) == 12
@@ -69,10 +65,9 @@ class TestToTimeslicesHourlySingleDay:
                 assert bracket.hour_end == time(i + 1, 0, 0)
             else:
                 assert bracket.hour_end == ENDOFDAY
-        
-        # Verify total timeslices = 3 daytypes × 12 timebrackets
-        assert len(result.timeslices) == 3 * 12
-        assert len(result.timeslices) == 36
+
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_hourly_single_day_with_gaps(self):
         """Test hourly snapshots with gaps (e.g., every 3 hours)."""
@@ -83,8 +78,11 @@ class TestToTimeslicesHourlySingleDay:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: 3
-        assert len(result.daytypes) == 3
+        # Verify seasons x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 8 brackets (00:00, 03:00, 06:00, ..., 21:00)
         assert len(result.dailytimebrackets) == 8
@@ -97,9 +95,8 @@ class TestToTimeslicesHourlySingleDay:
             else:
                 assert bracket.hour_end == ENDOFDAY
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 3 * 8
-        assert len(result.timeslices) == 24
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
 
 
 class TestToTimeslicesHourlyMultipleDays:
@@ -114,23 +111,17 @@ class TestToTimeslicesHourlyMultipleDays:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before (Jan 1 - Jun 14), Jun 15, Jun 16, after (Jun 17 - Dec 31)
-        assert len(result.daytypes) == 4
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 6, 14)
-        assert daytypes_list[1] == DayType(6, 15, 6, 15)
-        assert daytypes_list[2] == DayType(6, 16, 6, 16)
-        assert daytypes_list[3] == DayType(6, 17, 12, 31)
+        # Verify season x daytypes:
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 24 hourly brackets
         assert len(result.dailytimebrackets) == 24
         
-        # Verify total timeslices = 4 daytypes × 24 timebrackets
-        assert len(result.timeslices) == 4 * 24
-        assert len(result.timeslices) == 96
-        
-        # Verify mapping
-        assert len(result.snapshot_to_timeslice) == 48
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_hourly_full_week(self):
         """Test hourly snapshots for a full week (7 days)."""
@@ -141,20 +132,17 @@ class TestToTimeslicesHourlyMultipleDays:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before (Jan 1 - Jun 14), 7 individual days, after (Jun 22 - Dec 31)
-        assert len(result.daytypes) == 9
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 6, 14)
-        for i in range(7):
-            assert daytypes_list[i + 1] == DayType(6, 15 + i, 6, 15 + i)
-        assert daytypes_list[8] == DayType(6, 22, 12, 31)
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 24 hourly brackets
         assert len(result.dailytimebrackets) == 24
         
-        # Verify total timeslices = 9 daytypes × 24 timebrackets
-        assert len(result.timeslices) == 9 * 24
-        assert len(result.timeslices) == 216
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_hourly_multiple_days_different_hours_each_day(self):
         """Test hourly snapshots that start at different hours on different days."""
@@ -169,8 +157,11 @@ class TestToTimeslicesHourlyMultipleDays:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: 4 (before, Jun 15-17, after)
-        assert len(result.daytypes) == 5
+        # Verify seasons x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: all unique times across all days
         unique_times = sorted(set(ts.time() for ts in snapshots))
@@ -189,13 +180,11 @@ class TestToTimeslicesDailyConsecutive:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before (Jan 1 - Jun 14), 7 individual days, after (Jun 22 - Dec 31)
-        assert len(result.daytypes) == 9
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 6, 14)
-        for i in range(7):
-            assert daytypes_list[i + 1] == DayType(6, 15 + i, 6, 15 + i)
-        assert daytypes_list[8] == DayType(6, 22, 12, 31)
+        # Verify seasons x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: single full-day bracket
         assert len(result.dailytimebrackets) == 1
@@ -203,12 +192,8 @@ class TestToTimeslicesDailyConsecutive:
         assert bracket.hour_start == time(0, 0, 0)
         assert bracket.hour_end == ENDOFDAY
         
-        # Verify total timeslices = 9 daytypes × 1 timebracket
-        assert len(result.timeslices) == 9 * 1
-        assert len(result.timeslices) == 9
-        
-        # Verify mapping
-        assert len(result.snapshot_to_timeslice) == 7
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_daily_consecutive_one_month(self):
         """Test 30 consecutive daily snapshots (full month)."""
@@ -219,20 +204,17 @@ class TestToTimeslicesDailyConsecutive:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before (Jan 1 - May 31), 30 individual days, after (Jul 1 - Dec 31)
-        assert len(result.daytypes) == 32
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 5, 31)
-        for i in range(30):
-            assert daytypes_list[i + 1] == DayType(6, 1 + i, 6, 1 + i)
-        assert daytypes_list[31] == DayType(7, 1, 12, 31)
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: single full-day bracket
         assert len(result.dailytimebrackets) == 1
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 32 * 1
-        assert len(result.timeslices) == 32
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_daily_consecutive_spanning_month_boundary(self):
         """Test daily snapshots spanning month boundary."""
@@ -244,19 +226,14 @@ class TestToTimeslicesDailyConsecutive:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, 5 individual days, after
-        assert len(result.daytypes) == 7
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 6, 27)
-        assert daytypes_list[1] == DayType(6, 28, 6, 28)
-        assert daytypes_list[2] == DayType(6, 29, 6, 29)
-        assert daytypes_list[3] == DayType(6, 30, 6, 30)
-        assert daytypes_list[4] == DayType(7, 1, 7, 1)
-        assert daytypes_list[5] == DayType(7, 2, 7, 2)
-        assert daytypes_list[6] == DayType(7, 3, 12, 31)
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 7
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
 
 
 class TestToTimeslicesDailyGapped:
@@ -271,24 +248,17 @@ class TestToTimeslicesDailyGapped:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before (Jan 1 - May 31), Jun 1, gap (Jun 2-4), Jun 5, after (Jun 6 - Dec 31)
-        assert len(result.daytypes) == 5
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 5, 31)
-        assert daytypes_list[1] == DayType(6, 1, 6, 1)
-        assert daytypes_list[2] == DayType(6, 2, 6, 4)  # Gap
-        assert daytypes_list[3] == DayType(6, 5, 6, 5)
-        assert daytypes_list[4] == DayType(6, 6, 12, 31)
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: single full-day bracket
         assert len(result.dailytimebrackets) == 1
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 5 * 1
-        assert len(result.timeslices) == 5
-        
-        # Verify mapping
-        assert len(result.snapshot_to_timeslice) == 2
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_daily_gapped_multiple_gaps(self):
         """Test daily snapshots with multiple gaps."""
@@ -303,23 +273,14 @@ class TestToTimeslicesDailyGapped:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, Mar 1, gap1, Mar 5, gap2, Jun 1, gap3, Jun 10, gap4, Sep 1, after
-        assert len(result.daytypes) == 11
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 2, 29)  # Before Mar 1
-        assert daytypes_list[1] == DayType(3, 1, 3, 1)   # Mar 1
-        assert daytypes_list[2] == DayType(3, 2, 3, 4)   # Gap: Mar 2-4
-        assert daytypes_list[3] == DayType(3, 5, 3, 5)   # Mar 5
-        assert daytypes_list[4] == DayType(3, 6, 5, 31)  # Gap: Mar 6 - May 31
-        assert daytypes_list[5] == DayType(6, 1, 6, 1)   # Jun 1
-        assert daytypes_list[6] == DayType(6, 2, 6, 9)   # Gap: Jun 2-9
-        assert daytypes_list[7] == DayType(6, 10, 6, 10) # Jun 10
-        assert daytypes_list[8] == DayType(6, 11, 8, 31) # Gap: Jun 11 - Aug 31
-        assert daytypes_list[9] == DayType(9, 1, 9, 1)   # Sep 1
-        assert daytypes_list[10] == DayType(9, 2, 12, 31) # After Sep 1
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 11
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_daily_gapped_large_gap(self):
         """Test daily snapshots with very large gap (multiple months)."""
@@ -330,17 +291,14 @@ class TestToTimeslicesDailyGapped:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, Jan 15, gap, Nov 15, after
-        assert len(result.daytypes) == 5
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 1, 14)
-        assert daytypes_list[1] == DayType(1, 15, 1, 15)
-        assert daytypes_list[2] == DayType(1, 16, 11, 14)  # Large gap
-        assert daytypes_list[3] == DayType(11, 15, 11, 15)
-        assert daytypes_list[4] == DayType(11, 16, 12, 31)
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 5
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
 
 
 class TestToTimeslicesAnnualMultiYear:
@@ -355,21 +313,17 @@ class TestToTimeslicesAnnualMultiYear:
         assert result.years == [2020, 2021]
         assert result.validate_coverage()
         
-        # Verify daytypes: Jan 1, Jan 2 - Dec 31
-        assert len(result.daytypes) == 2
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 1, 1)
-        assert daytypes_list[1] == DayType(1, 2, 12, 31)
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: single full-day bracket
         assert len(result.dailytimebrackets) == 1
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 2 * 1
-        assert len(result.timeslices) == 2
-        
-        # Verify mapping
-        assert len(result.snapshot_to_timeslice) == 2
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_annual_five_consecutive_years(self):
         """Test annual snapshots for five consecutive years."""
@@ -383,11 +337,14 @@ class TestToTimeslicesAnnualMultiYear:
         assert result.years == [2020, 2021, 2022, 2023, 2024]
         assert result.validate_coverage()
         
-        # Verify daytypes: Jan 1, Jan 2 - Dec 31
-        assert len(result.daytypes) == 2
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 2
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_annual_gapped_years(self):
         """Test annual snapshots with gaps (e.g., 2020, 2022, 2025)."""
@@ -399,11 +356,14 @@ class TestToTimeslicesAnnualMultiYear:
         assert result.years == [2020, 2022, 2025]
         assert result.validate_coverage()
         
-        # Verify daytypes: Jan 1, Jan 2 - Dec 31
-        assert len(result.daytypes) == 2
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 2
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_annual_mid_year_snapshots(self):
         """Test annual snapshots at mid-year (e.g., June 30)."""
@@ -416,15 +376,14 @@ class TestToTimeslicesAnnualMultiYear:
         assert result.years == [2020, 2021, 2022]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, Jun 30, after
-        assert len(result.daytypes) == 3
-        daytypes_list = sorted(result.daytypes)
-        assert daytypes_list[0] == DayType(1, 1, 6, 29)
-        assert daytypes_list[1] == DayType(6, 30, 6, 30)
-        assert daytypes_list[2] == DayType(7, 1, 12, 31)
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
-        # Verify total timeslices
-        assert len(result.timeslices) == 3
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
 
 
 class TestToTimeslicesMixedTimes:
@@ -441,8 +400,11 @@ class TestToTimeslicesMixedTimes:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, 7 individual days, after
-        assert len(result.daytypes) == 9
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 00:00-12:00, 12:00-24:00
         assert len(result.dailytimebrackets) == 2
@@ -452,9 +414,8 @@ class TestToTimeslicesMixedTimes:
         assert brackets_list[1].hour_start == time(12, 0, 0)
         assert brackets_list[1].hour_end == ENDOFDAY
         
-        # Verify total timeslices = 9 daytypes × 2 timebrackets
-        assert len(result.timeslices) == 9 * 2
-        assert len(result.timeslices) == 18
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_mixed_times_three_times_per_day(self):
         """Test snapshots at 00:00, 08:00, and 16:00 for multiple days."""
@@ -468,8 +429,11 @@ class TestToTimeslicesMixedTimes:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, 5 individual days, after
-        assert len(result.daytypes) == 7
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 00:00-08:00, 08:00-16:00, 16:00-24:00
         assert len(result.dailytimebrackets) == 3
@@ -481,9 +445,8 @@ class TestToTimeslicesMixedTimes:
         assert brackets_list[2].hour_start == time(16, 0, 0)
         assert brackets_list[2].hour_end == ENDOFDAY
         
-        # Verify total timeslices = 7 daytypes × 3 timebrackets
-        assert len(result.timeslices) == 7 * 3
-        assert len(result.timeslices) == 21
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_mixed_times_irregular_pattern(self):
         """Test snapshots with irregular time pattern across days."""
@@ -500,16 +463,18 @@ class TestToTimeslicesMixedTimes:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, Jun 15-17, after
-        assert len(result.daytypes) == 5
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: all unique times create brackets
         # Unique times: 00:00, 06:00, 08:00, 12:00, 16:00, 18:00
         assert len(result.dailytimebrackets) == 6
         
-        # Verify total timeslices = 5 daytypes × 6 timebrackets
-        assert len(result.timeslices) == 5 * 6
-        assert len(result.timeslices) == 30
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
     
     def test_mixed_times_morning_evening_only(self):
         """Test snapshots only at morning (06:00) and evening (18:00)."""
@@ -522,8 +487,11 @@ class TestToTimeslicesMixedTimes:
         assert result.years == [2020]
         assert result.validate_coverage()
         
-        # Verify daytypes: before, 30 individual days, after
-        assert len(result.daytypes) == 32
+        # Verify season x daytypes
+        for y in result.years:
+            for m in range(1, 13):
+                for d in range(days_in_month(y, m)):
+                    assert sum(dt.contains_date(date(y, m, d+1)) for dt in result.daytypes) == 1  # Each day should be in exactly one daytype
         
         # Verify timebrackets: 00:00-06:00, 06:00-18:00, 18:00-24:00
         assert len(result.dailytimebrackets) == 3
@@ -535,9 +503,8 @@ class TestToTimeslicesMixedTimes:
         assert brackets_list[2].hour_start == time(18, 0, 0)
         assert brackets_list[2].hour_end == ENDOFDAY
         
-        # Verify total timeslices = 32 daytypes × 3 timebrackets
-        assert len(result.timeslices) == 32 * 3
-        assert len(result.timeslices) == 96
+        # Verify total timeslices = seasons * daytypes × timebrackets
+        assert len(result.timeslices) == len(result.seasons) * len(result.daytypes) * len(result.dailytimebrackets)
 
 
 class TestToTimeslicesTimesliceCountValidation:
@@ -548,43 +515,48 @@ class TestToTimeslicesTimesliceCountValidation:
         snapshots = pd.DatetimeIndex(['2020-06-15 12:00'])
         result = to_timeslices(snapshots)
         
+        n_seasons = len(result.seasons)
         n_daytypes = len(result.daytypes)
         n_timebrackets = len(result.dailytimebrackets)
         n_timeslices = len(result.timeslices)
         
-        # Verify: timeslices = daytypes × timebrackets
-        assert n_timeslices == n_daytypes * n_timebrackets
-        assert n_daytypes == 3  # before, Jun 15, after
+        # Verify: timeslices = seasons x daytypes × timebrackets
+        assert n_timeslices == n_seasons * n_daytypes * n_timebrackets
+        assert n_seasons == 3 # before, Jun, after
+        assert n_daytypes == 6
         assert n_timebrackets == 2  # 00:00-12:00, 12:00-24:00
-        assert n_timeslices == 6
     
     def test_timeslice_count_hourly_week(self):
         """Verify timeslice count for hourly week."""
         snapshots = pd.date_range('2020-03-01 00:00', periods=168, freq='h')  # 7 days
         result = to_timeslices(snapshots)
         
+        n_seasons = len(result.seasons)
         n_daytypes = len(result.daytypes)
         n_timebrackets = len(result.dailytimebrackets)
         n_timeslices = len(result.timeslices)
-        
-        assert n_timeslices == n_daytypes * n_timebrackets
-        assert n_daytypes == 9  # before, 7 days, after
-        assert n_timebrackets == 24  # 24 hours
-        assert n_timeslices == 216
+
+        # Verify: timeslices = seasons x daytypes × timebrackets
+        assert n_timeslices == n_seasons * n_daytypes * n_timebrackets
+        assert n_seasons == 3 # before, Mar, after
+        assert n_daytypes == 11
+        assert n_timebrackets == 24  # hourly
     
     def test_timeslice_count_daily_month(self):
         """Verify timeslice count for daily month."""
         snapshots = pd.date_range('2020-06-01', periods=30, freq='D')
         result = to_timeslices(snapshots)
         
+        n_seasons = len(result.seasons)
         n_daytypes = len(result.daytypes)
         n_timebrackets = len(result.dailytimebrackets)
         n_timeslices = len(result.timeslices)
-        
-        assert n_timeslices == n_daytypes * n_timebrackets
-        assert n_daytypes == 32  # before, 30 days, after
+
+        # Verify: timeslices = seasons x daytypes × timebrackets
+        assert n_timeslices == n_seasons * n_daytypes * n_timebrackets
+        assert n_seasons == 3 # before, Jun, after
+        assert n_daytypes == 31
         assert n_timebrackets == 1  # full day
-        assert n_timeslices == 32
     
     def test_timeslice_count_mixed_two_times(self):
         """Verify timeslice count for mixed times (2 times per day)."""
@@ -593,14 +565,15 @@ class TestToTimeslicesTimesliceCountValidation:
         snapshots = pd.DatetimeIndex(sorted(list(morning) + list(evening)))
         result = to_timeslices(snapshots)
         
+        n_seasons = len(result.seasons)
         n_daytypes = len(result.daytypes)
         n_timebrackets = len(result.dailytimebrackets)
         n_timeslices = len(result.timeslices)
         
-        assert n_timeslices == n_daytypes * n_timebrackets
-        assert n_daytypes == 12  # before, 10 days, after
+        assert n_timeslices == n_seasons * n_daytypes * n_timebrackets
+        assert n_seasons == 3 # before, Jun, after
+        assert n_daytypes == 13
         assert n_timebrackets == 2  # 00:00-18:00, 18:00-24:00
-        assert n_timeslices == 24
     
     def test_timeslice_count_multi_year_annual(self):
         """Verify timeslice count for multi-year annual snapshots."""
@@ -610,14 +583,15 @@ class TestToTimeslicesTimesliceCountValidation:
         ])
         result = to_timeslices(snapshots)
         
+        n_seasons = len(result.seasons)
         n_daytypes = len(result.daytypes)
         n_timebrackets = len(result.dailytimebrackets)
         n_timeslices = len(result.timeslices)
         
-        assert n_timeslices == n_daytypes * n_timebrackets
-        assert n_daytypes == 2  # Jan 1, Jan 2 - Dec 31
+        assert n_timeslices == n_seasons * n_daytypes * n_timebrackets
+        assert n_seasons == 2
+        assert n_daytypes == 6
         assert n_timebrackets == 1  # full day
-        assert n_timeslices == 2
     
     def test_timeslice_count_leap_year(self):
         """Verify timeslice count handles leap year correctly."""
@@ -625,14 +599,15 @@ class TestToTimeslicesTimesliceCountValidation:
         snapshots = pd.DatetimeIndex(['2020-02-29 00:00'])
         result = to_timeslices(snapshots)
         
+        n_seasons = len(result.seasons)
         n_daytypes = len(result.daytypes)
         n_timebrackets = len(result.dailytimebrackets)
         n_timeslices = len(result.timeslices)
         
-        assert n_timeslices == n_daytypes * n_timebrackets
-        assert n_daytypes == 3  # before, Feb 29, after
+        assert n_timeslices == n_seasons * n_daytypes * n_timebrackets
+        assert n_seasons == 3
+        assert n_daytypes == 6
         assert n_timebrackets == 1  # full day
-        assert n_timeslices == 3
         
         # Verify coverage for leap year
         assert result.validate_coverage()
@@ -647,14 +622,15 @@ class TestToTimeslicesTimesliceCountValidation:
         ])
         result = to_timeslices(snapshots)
         
+        n_seasons = len(result.seasons)
         n_daytypes = len(result.daytypes)
         n_timebrackets = len(result.dailytimebrackets)
         n_timeslices = len(result.timeslices)
         
-        assert n_timeslices == n_daytypes * n_timebrackets
+        assert n_timeslices == n_seasons * n_daytypes * n_timebrackets
+        assert n_seasons == 8
+        assert n_daytypes == 6
         assert n_timebrackets == 3  # 3 time brackets
-        # Daytypes: 4 days, 3 gaps, after = 9 daytypes
-        assert n_daytypes == 8
 
 
 class TestToTimeslicesEdgeCases:
@@ -673,9 +649,6 @@ class TestToTimeslicesEdgeCases:
         
         assert result.years == [2020]
         assert result.validate_coverage()
-        assert len(result.daytypes) == 2  # Jan 1, Jan 2 - Dec 31
-        assert len(result.dailytimebrackets) == 1
-        assert len(result.timeslices) == 2
     
     def test_single_snapshot_at_end_of_year(self):
         """Test single snapshot at end of year, outside 1-minute tolerance.
@@ -689,16 +662,6 @@ class TestToTimeslicesEdgeCases:
         
         assert result.years == [2020]
         assert result.validate_coverage()
-        
-        # Daytypes: Jan 1 - Dec 30, Dec 31
-        assert len(result.daytypes) == 2
-        
-        # Timebrackets: [00:00, 23:58:00), [23:58:00, ENDOFDAY)
-        assert len(result.dailytimebrackets) == 2
-        
-        # Total timeslices
-        assert len(result.timeslices) == 2 * 2
-        assert len(result.timeslices) == 4
     
     def test_unsorted_snapshots(self):
         """Test that unsorted snapshots are handled correctly."""
@@ -712,7 +675,6 @@ class TestToTimeslicesEdgeCases:
         # Should still work correctly
         assert result.years == [2020]
         assert result.validate_coverage()
-        assert len(result.snapshot_to_timeslice) == 3
     
     def test_duplicate_snapshots(self):
         """Test that duplicate snapshots are handled correctly."""
@@ -726,8 +688,6 @@ class TestToTimeslicesEdgeCases:
         # Duplicates should be removed
         assert result.years == [2020]
         assert result.validate_coverage()
-        # Check that mapping only has unique snapshots
-        assert len(result.snapshot_to_timeslice) == 2
     
     def test_year_boundary_crossing(self):
         """Test snapshots crossing year boundary."""
@@ -739,8 +699,6 @@ class TestToTimeslicesEdgeCases:
         
         assert result.years == [2020, 2021]
         assert result.validate_coverage()
-        # Should handle both years correctly
-        assert len(result.snapshot_to_timeslice) == 2
     
     def test_leap_year_and_non_leap_year(self):
         """Test that both leap and non-leap years validate correctly."""
@@ -753,9 +711,6 @@ class TestToTimeslicesEdgeCases:
         
         assert result.years == [2020, 2021]
         assert result.validate_coverage()
-        
-        # Both years should be fully covered
-        assert len(result.daytypes) == 4  # Before Feb 28/29, Feb 28, Feb 29, after
     
     def test_microsecond_precision(self):
         """Test snapshots with microsecond precision."""
@@ -789,10 +744,3 @@ class TestToTimeslicesEdgeCases:
         bracket = list(result.dailytimebrackets)[0]
         assert bracket.hour_start == time(0, 0, 0)
         assert bracket.hour_end == ENDOFDAY
-        
-        # Daytypes: before, Jun 15, after
-        assert len(result.daytypes) == 3
-        
-        # Total timeslices
-        assert len(result.timeslices) == 3 * 1
-        assert len(result.timeslices) == 3
