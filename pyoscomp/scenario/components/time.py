@@ -539,6 +539,10 @@ class TimeComponent(ScenarioComponent):
                             "VALUE": float(Decimal(str(b_val)))
                         })
 
+        # Reorder yearsplit and daysplit
+        year_split_rows.sort(key=lambda x: (x['YEAR'], x['TIMESLICE']))
+        day_split_rows.sort(key=lambda x: (x['YEAR'], x['DAILYTIMEBRACKET']))
+
         # Update DataFrames
         self.timeslices_df = pd.DataFrame({"VALUE": timeslice_data})
         self.conversionls_df = pd.DataFrame(map_ls)
