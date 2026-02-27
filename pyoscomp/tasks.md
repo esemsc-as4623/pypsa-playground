@@ -51,7 +51,7 @@ To measure the **pure effect of temporal representation**:
 
 | ID | Task | Description | Files Affected |
 |----|------|-------------|----------------|
-| **P0.1** | Create `HarmonizationValidator` class | Validates that a scenario satisfies all harmonization requirements. Reports discrepancies with tolerances. | New: `pyoscomp/validation/harmonization.py` |
+| **P0.1** | Create `Harmonizer` class | Validates that a scenario satisfies all harmonization requirements. Reports discrepancies with tolerances. | New: `pyoscomp/validation/harmonization.py` |
 | **P0.2** | Implement discount rate validation | Compare `DiscountRate.csv` (OSeMOSYS) vs network settings (PyPSA) | `validation/harmonization.py` |
 | **P0.3** | Implement cost validation | Sum CAPEX/OPEX by technology, compare across models | `validation/harmonization.py` |
 | **P0.4** | Implement demand validation | Compare annual totals, compute correlation of profiles | `validation/harmonization.py` |
