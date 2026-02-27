@@ -5,7 +5,6 @@ Topology component for scenario building in PyPSA-OSeMOSYS Comparison Framework.
 
 This component handles spatial structure definitions:
 - REGION set (nodes/buses in the energy system network)
-- TradeRoute parameter (inter-regional connections) - future implementation
 
 OSeMOSYS Terminology: REGION
 PyPSA Terminology: Bus
