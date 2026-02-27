@@ -416,7 +416,7 @@ class TimeVisualizer(ComponentVisualizer):
         self,
         year: Optional[int] = None,
         figsize: Tuple[float, float] = (12, 10),
-        pct_threshold: float = 2.0,
+        pct_threshold: float = 3.0,
     ):
         """
         Pie chart of timeslice durations for a single year.
