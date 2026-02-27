@@ -35,8 +35,8 @@ class DailyTimeBracket:
             if self.is_full_day():
                 self.name = "DAY"
             else:
-                end_str = "24:00" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H:%M')
-                self.name = f"{self.hour_start.strftime('%H:%M')} to {end_str}"
+                end_str = "2400" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H%M')
+                self.name = f"T{self.hour_start.strftime('%H%M')}_to_{end_str}"
     
     def validate(self):
         """
@@ -145,7 +145,7 @@ class DailyTimeBracket:
         return self.hour_start < other.hour_start
     
     def __repr__(self):
-        return f"DailyTimeBracket({self.hour_start!r}, {self.hour_end!r}, name={self.name!r})"
+        return f"DailyTimeBracket({self.hour_start!r} to {self.hour_end!r})"
 
 
 @dataclass
@@ -163,7 +163,7 @@ class DayType:
     day_end : int
         End day (1-31).
     name : str, optional
-        DayType name. Auto-generated if not provided (e.g., "01-01 to 08-15").
+        DayType name. Auto-generated if not provided (e.g., "01_to_07").
     """
     day_start: int
     day_end: int
@@ -174,7 +174,7 @@ class DayType:
         self.validate()
         # Initialize the name attribute if not provided
         if not self.name:
-            self.name = f"{self.day_start:02d} to {self.day_end:02d}"
+            self.name = f"{self.day_start:02d}_to_{self.day_end:02d}"
 
     def validate(self):
         """Validate month/day combinations."""
@@ -191,12 +191,12 @@ class DayType:
     @classmethod
     def from_string(cls, s: str) -> 'DayType':
         """
-        Create DayType from string like "01-15" or "01 to 15".
+        Create DayType from string like "01-07" or "01 to 07" or "01_to_07".
     
         Parameters
         ----------
         s : str
-            String in format "DD-DD" or "DD to DD" (e.g., "01-15" or "01 to 15").
+            String in format "DD-DD" or "DD to DD" or "DD_to_DD".
     
         Returns
         -------
@@ -211,14 +211,16 @@ class DayType:
         DayType(03 to 06) # multi-day
         """
         try:
-            if "to" in s:
-                d1, d2 = s.split('to')
+            if "_to_" in s:
+                d1, d2 = s.split('_to_')
+            elif " to " in s:
+                d1, d2 = s.split(' to ')
             else:
                 d1, d2 = s.split('-')
             d1 = d1.strip()
             d2 = d2.strip()
         except Exception as e:
-            raise ValueError(f"Invalid DayType string: '{s}'. Expected format 'DD-DD' or 'DD to DD'.") from e
+            raise ValueError(f"Invalid DayType string: '{s}'. Expected format 'DD-DD' or 'DD to DD' or 'DD_to_DD'.") from e
         return cls(day_start=int(d1), day_end=int(d2))
     
     def is_one_day(self) -> bool:
@@ -326,7 +328,7 @@ class Season:
     month_end : int
         End month (1-12).
     name : str, optional
-        Season name. Auto-generated if not provided (e.g., "01 to 03").
+        Season name. Auto-generated if not provided (e.g., "01_to_03").
     """
     month_start: int
     month_end: int
@@ -338,7 +340,7 @@ class Season:
             if self.is_full_year():
                 self.name = "YEAR"
             else:
-                self.name = f"{self.month_start:02d} to {self.month_end:02d}"
+                self.name = f"{self.month_start:02d}_to_{self.month_end:02d}"
 
     def validate(self):
         """Validate month range."""
@@ -353,12 +355,12 @@ class Season:
     @classmethod
     def from_string(cls, s: str) -> 'Season':
         """
-        Create Season from string like "01-03" or "01 to 03".
+        Create Season from string like "01-03" or "01 to 03" or "01_to_03".
 
         Parameters
         ----------
         s : str
-            String in format "MM-MM" or "MM to MM" (e.g., "01-03" or "01 to 03").
+            String in format "MM-MM" or "MM to MM" or "MM_to_MM".
 
         Returns
         -------
@@ -375,14 +377,16 @@ class Season:
         Season(01 to 12) # full-year
         """
         try:
-            if "to" in s:
-                m1, m2 = s.split('to')
+            if "_to_" in s:
+                m1, m2 = s.split('_to_')
+            elif " to " in s:
+                m1, m2 = s.split(' to ')
             else:
                 m1, m2 = s.split('-')
             m1 = m1.strip()
             m2 = m2.strip()
         except Exception as e:
-            raise ValueError(f"Invalid Season string: '{s}'. Expected format 'MM-MM' or 'MM to MM'.") from e
+            raise ValueError(f"Invalid Season string: '{s}'. Expected format 'MM-MM' or 'MM to MM' or 'MM_to_MM'.") from e
         return cls(month_start=int(m1), month_end=int(m2))
     
     def is_full_year(self) -> bool:
@@ -470,9 +474,9 @@ class Timeslice:
         Returns
         -------
         str
-            Format: "[Season]_[DayType]_[DailyTimeBracket]" (e.g., "[01 to 01]_[10 to 15]_[06:00 to 12:00]").
+            Format: "Season_DayType_DailyTimeBracket" (e.g., "01_to_01_10_to_15_T0600_to_1200").
         """
-        return f"[{self.season.name}]_[{self.daytype.name}]_[{self.dailytimebracket.name}]"
+        return f"{self.season.name}_{self.daytype.name}_{self.dailytimebracket.name}"
     
     @property
     def hour_start(self) -> time:

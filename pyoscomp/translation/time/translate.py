@@ -452,7 +452,7 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp
     >>> for filename, df in csv_dict.items():
     ...     df.to_csv(f'osemosys_scenario/{filename}.csv', index=False)
     >>> print(f"Created {len(csv_dict)} CSV files")
-    Created 8 CSV files
+    Created 11 CSV files
     
     Multi-year conversion:
     

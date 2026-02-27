@@ -1,7 +1,7 @@
 # pyoscomp/translation/time/results.py
 
 import pandas as pd
-from typing import Union, List, Set, Dict, Tuple
+from typing import Union, List, Set, Dict
 from dataclasses import dataclass
 
 from ...constants import TOL, hours_in_year
@@ -114,7 +114,7 @@ class TimesliceResult:
         
         Creates DataFrames for all required OSeMOSYS time parameters that can be
         written directly to CSV files for use in OSeMOSYS models.
-        
+
         Returns
         -------
         Dict[str, pd.DataFrame]
@@ -128,6 +128,9 @@ class TimesliceResult:
             - 'YearSplit': DataFrame with columns ['TIMESLICE', 'YEAR', 'VALUE']
             - 'DaySplit': DataFrame with columns ['TIMESLICE', 'YEAR', 'VALUE']
             - 'DaysInDayType': DataFrame with columns ['SEASON', 'DAYTYPE', 'YEAR', 'VALUE']
+            - 'Conversionls': DataFrame with columns ['TIMESLICE', 'SEASON', 'VALUE']
+            - 'Conversionld': DataFrame with columns ['TIMESLICE', 'DAYTYPE', 'VALUE']
+            - 'Conversionlh': DataFrame with columns ['TIMESLICE', 'DAILYTIMEBRACKET', 'VALUE']
         
         Examples
         --------
@@ -142,7 +145,8 @@ class TimesliceResult:
         result['YEAR'] = pd.DataFrame({'VALUE': self.years})
         
         # SEASON.csv
-        result['SEASON'] = pd.DataFrame({'VALUE': list(self.seasons)})
+        season_names = sorted(set(s.name for s in self.seasons))
+        result['SEASON'] = pd.DataFrame({'VALUE': season_names})
         
         # DAYTYPE.csv
         daytype_names = sorted(set(dt.name for dt in self.daytypes))
@@ -170,11 +174,11 @@ class TimesliceResult:
         # DaySplit - length of one timebracket in one specific day as a fraction of the year
         day_split_rows = []
         for year in self.years:
-            for ts in self.timeslices:
+            for dtb in self.dailytimebrackets:
                 day_split_rows.append({
-                    'TIMESLICE': ts.name,
+                    'DAILYTIMEBRACKET': dtb.name,
                     'YEAR': year,
-                    'VALUE': ts.dailytimebracket.duration_hours() / hours_in_year(year)
+                    'VALUE': dtb.duration_hours() / hours_in_year(year)
                 })
         result[f'DaySplit'] = pd.DataFrame(day_split_rows)
         
@@ -195,6 +199,31 @@ class TimesliceResult:
                         'VALUE': days_in_season_year
                     })
         result[f'DaysInDayType'] = pd.DataFrame(didt_rows)
+
+        # Conversionls, Conversionld, Conversionlh - mapping timeslices to their components
+        conversion_ls_rows = []
+        conversion_ld_rows = []
+        conversion_lh_rows = []
+        for ts in self.timeslices:
+            conversion_ls_rows.append({
+                'TIMESLICE': ts.name,
+                'SEASON': ts.season.name,
+                'VALUE': 1
+            })
+            conversion_ld_rows.append({
+                'TIMESLICE': ts.name,
+                'DAYTYPE': ts.daytype.name,
+                'VALUE': 1
+            })
+            conversion_lh_rows.append({
+                'TIMESLICE': ts.name,
+                'DAILYTIMEBRACKET': ts.dailytimebracket.name,
+                'VALUE': 1
+            })
+
+        result[f'Conversionls'] = pd.DataFrame(conversion_ls_rows)
+        result[f'Conversionld'] = pd.DataFrame(conversion_ld_rows)
+        result[f'Conversionlh'] = pd.DataFrame(conversion_lh_rows)
 
         return result
     
