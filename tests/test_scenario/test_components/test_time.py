@@ -8,8 +8,9 @@ Tests cover:
 - Properties (years, timeslices, seasons, daytypes, dailytimebrackets)
 - add_time_structure with various configurations
 - set_years method
-- YearSplit normalization (sums to 1.0)
+- YearSplit and DaySplit normalization (sums to 1.0)
 - Conversion tables (Conversionls, Conversionld, Conversionlh)
+- DaysInDayType parameter consistency
 - load / save operations
 - load_time_axis static method
 - validate method

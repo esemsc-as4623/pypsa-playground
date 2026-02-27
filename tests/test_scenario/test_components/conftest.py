@@ -9,6 +9,11 @@ Provides pre-configured scenario directories at various stages:
 - Scenario with topology + time structure
 - Scenario with topology + time + demand
 - Scenario with topology + time + supply
+- TODO: Scenario with topology + time + supply + storage
+- TODO: Scenario with topology + time + supply + performance
+- TODO: Scenario with topology + time + supply + storage + performance
+- TODO: Scenario with topology + time + supply + performance + economics
+- TODO: Scenario with topology + time + supply + storage + performance + economics
 - Complete scenario with all prerequisites
 """
 
