@@ -450,7 +450,7 @@ class TestDailyTimeBracket:
         """Test morning time bracket."""
         dtb = DailyTimeBracket(time(6, 0, 0), time(12, 0, 0))
         assert not dtb.is_full_day()
-        assert dtb.name == "06:00 to 12:00"
+        assert dtb.name == "T0600_to_1200"
         assert dtb.duration_hours() == 6.0
     
     def test_afternoon_bracket(self):
@@ -484,7 +484,7 @@ class TestDailyTimeBracket:
     def test_evening_to_endofday(self):
         """Test bracket extending to end of day."""
         dtb = DailyTimeBracket(time(18, 0, 0), ENDOFDAY)
-        assert dtb.name == "18:00 to 24:00"
+        assert dtb.name == "T1800_to_2400"
         assert dtb.duration_hours() == 6.0
         assert dtb.contains_time(time(18, 0, 0))
         assert dtb.contains_time(time(23, 59, 59))
@@ -646,10 +646,10 @@ class TestTimeslice:
         dt = DayType(8, 14)
         dtb = DailyTimeBracket(time(9, 0, 0), time(17, 0, 0))
         ts = Timeslice(season=s, daytype=dt, dailytimebracket=dtb)
-        assert "01 to 03" in ts.name
-        assert "08 to 14" in ts.name
-        assert "09:00" in ts.name
-        assert "17:00" in ts.name
+        assert "01_to_03" in ts.name
+        assert "08_to_14" in ts.name
+        assert "0900" in ts.name
+        assert "1700" in ts.name
     
     def test_name_generation_endofday(self):
         """Test name generation with ENDOFDAY."""
@@ -657,7 +657,7 @@ class TestTimeslice:
         dt = DayType(31, 31)
         dtb = DailyTimeBracket(time(18, 0, 0), ENDOFDAY)
         ts = Timeslice(season=s, daytype=dt, dailytimebracket=dtb)
-        assert "24:00" in ts.name
+        assert "2400" in ts.name
     
     # ========== contains_timestamp() ==========
     
