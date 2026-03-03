@@ -1,8 +1,9 @@
 # pyoscomp/translation/time/results.py
 
 import pandas as pd
-from typing import Union, List, Set, Dict
-from dataclasses import dataclass
+from typing import Optional, Union, List, Set, Dict
+from datetime import datetime
+from dataclasses import dataclass, field
 
 from ...constants import TOL, hours_in_year
 from .structures import Season, DayType, DailyTimeBracket, Timeslice
@@ -95,6 +96,7 @@ class TimesliceResult:
     daytypes: Set[DayType]
     dailytimebrackets: Set[DailyTimeBracket]
     timeslices: List[Timeslice]
+    snapshots: Optional[pd.DatetimeIndex] = field(default=None, repr=False)
 
     def validate_coverage(self) -> bool:
         """Validate that timeslices partition the year completely."""
@@ -278,7 +280,7 @@ class SnapshotResult:
     >>> result.apply_to_network(network)
     """
     years: List[int]
-    snapshots: Union[pd.MultiIndex, pd.Index, pd.DatetimeIndex, pd.Timestamp]
+    snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp], List[datetime]]
     weightings: pd.Series # Index aligned with snapshots
     timeslice_names: List[str]
 
