@@ -7,8 +7,6 @@ Provides :class:`TimeVisualizer` with the following plots:
 
 - ``plot_timeslice_structure`` – horizontal stacked-bar showing the
   hierarchical Season → DayType → DailyTimeBracket breakdown.
-- ``plot_duration_pie`` – pie chart of timeslice durations for a
-  single representative year.
 - ``plot_daysplit_bar`` – bar chart of intra-day bracket hours.
 
 All values are year-specific (leap-year aware) and displayed to two
@@ -36,9 +34,9 @@ class TimeVisualizer(ComponentVisualizer):
     Visualizer for :class:`TimeComponent` or PyPSA Network snapshots.
 
     When initialized with a :class:`TimeComponent`, provides OSeMOSYS
-    timeslice visualizations (pie charts, stacked bars, etc.).  When
-    initialized with a ``pypsa.Network``, provides a snapshot timeline
-    visualisation showing temporal coverage and spacing.
+    timeslice visualizations. When initialized with a ``pypsa.Network``, 
+    provides a snapshot timeline visualisation showing temporal coverage 
+    and spacing.
 
     Parameters
     ----------
@@ -405,196 +403,6 @@ class TimeVisualizer(ComponentVisualizer):
             f"Accounted: {total_hours:,.2f} / {year_hours} Hours",
             fontsize=18,
             pad=20,
-        )
-
-        plt.tight_layout()
-        return fig, ax
-
-    # ------------------------------------------------------------------
-
-    def plot_duration_pie(
-        self,
-        year: Optional[int] = None,
-        figsize: Tuple[float, float] = (12, 10),
-        pct_threshold: float = 3.0,
-    ):
-        """
-        Pie chart of timeslice durations for a single year.
-
-        Each wedge represents one timeslice.  Colour encodes DayType,
-        hatch pattern encodes DailyTimeBracket (matching the stacked-bar
-        chart).  Adjacent wedges belonging to the same season are grouped
-        with a thick black outline, and a single external label shows the
-        season name with its average day count.
-
-        Wedges smaller than *pct_threshold* % have their percentage and
-        outer labels suppressed to avoid clutter.
-
-        Parameters
-        ----------
-        year : int, optional
-            Model year.  Defaults to the earliest year.
-        figsize : tuple of float, optional
-            Figure size ``(width, height)`` in inches.
-        pct_threshold : float, optional
-            Minimum percentage for a wedge to display its label.
-            Defaults to ``2.0``.
-
-        Returns
-        -------
-        fig : matplotlib.figure.Figure
-        ax : matplotlib.axes.Axes
-        """
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-        import numpy as np
-
-        self._apply_style()
-
-        # 1. Prepare data (sorted by season so same-season wedges are adjacent)
-        ys, slice_map, data, rep_year = self._prepare_data(year)
-        days_lookup = self._days_lookup(rep_year)
-        data.sort(key=lambda d: (d['season'], d['daytype'], d['timebracket']))
-
-        # 2. Style maps (consistent with plot_timeslice_structure)
-        sorted_daytypes = sorted({d['daytype'] for d in data})
-        sorted_timebrackets = sorted({d['timebracket'] for d in data})
-
-        dt_style = {
-            dt: {'color': self._color_for_index(i)}
-            for i, dt in enumerate(sorted_daytypes)
-        }
-        tb_style = {
-            tb: {'hatch': self._hatch_for_index(i)}
-            for i, tb in enumerate(sorted_timebrackets)
-        }
-
-        sizes = [d['duration'] for d in data]
-        colors = [dt_style[d['daytype']]['color'] for d in data]
-        hatches = [tb_style[d['timebracket']]['hatch'] for d in data]
-
-        total = sum(sizes)
-        pcts = [(s / total) * 100 if total else 0 for s in sizes]
-
-        # 3. Draw pie (no labels — we add them manually)
-        fig, ax = plt.subplots(figsize=figsize)
-        wedges, _ = ax.pie(
-            sizes,
-            colors=colors,
-            startangle=90,
-            wedgeprops={'edgecolor': 'white', 'linewidth': 0.8},
-        )
-
-        # 4. Apply hatch patterns
-        for wedge, h in zip(wedges, hatches):
-            wedge.set_hatch(h)
-
-        # 5. Percentage labels inside (suppress < threshold)
-        for wedge, pct in zip(wedges, pcts):
-            if pct < pct_threshold:
-                continue
-            angle = (wedge.theta2 + wedge.theta1) / 2
-            r = 0.75
-            x = r * np.cos(np.radians(angle))
-            y = r * np.sin(np.radians(angle))
-            ax.text(
-                x, y, f"{pct:.1f}%",
-                ha='center', va='center',
-                fontsize=12, fontweight='bold',
-            )
-
-        # 6. Thick black outlines grouping wedges by season
-        seasons_seen: Dict[str, list] = {}
-        for i, d in enumerate(data):
-            seasons_seen.setdefault(d['season'], []).append(i)
-
-        for season, indices in seasons_seen.items():
-            for idx in indices:
-                w = wedges[idx]
-                w_copy = mpatches.Wedge(
-                    center=w.center,
-                    r=w.r,
-                    theta1=wedges[indices[0]].theta1,
-                    theta2=wedges[indices[-1]].theta2,
-                    width=w.r,
-                    fill=False,
-                    edgecolor='black',
-                    linewidth=2.5,
-                )
-            ax.add_patch(w_copy)
-
-        # 7. External season labels (one per season)
-        for season, indices in seasons_seen.items():
-            theta1 = wedges[indices[0]].theta1
-            theta2 = wedges[indices[-1]].theta2
-            mid_angle = (theta1 + theta2) / 2
-
-            # Total season days (sum across daytypes for this season)
-            season_days = sum(
-                days_lookup.get(f"{season}_{d}", 0)
-                for d in sorted_daytypes
-            )
-
-            r_label = 1.15
-            x = r_label * np.cos(np.radians(mid_angle))
-            y = r_label * np.sin(np.radians(mid_angle))
-            ha = 'left' if x >= 0 else 'right'
-            ax.text(
-                x, y,
-                f"{season}\n({season_days:.2f} days)",
-                ha=ha, va='center',
-                fontsize=13, fontweight='bold',
-            )
-
-        # 8. Title (year-specific accounting)
-        year_hours = hours_in_year(rep_year)
-        total_hours = total * year_hours
-        ax.set_title(
-            f"Timeslice Duration Shares  (Year {rep_year})\n"
-            f"Accounted: {total_hours:,.2f} / {year_hours} Hours",
-            fontsize=18,
-            pad=20,
-        )
-
-        # 9. Legends (same style as plot_timeslice_structure)
-        dt_handles = [
-            mpatches.Patch(
-                facecolor=dt_style[dt]['color'],
-                label=dt,
-                edgecolor='black',
-            )
-            for dt in sorted_daytypes
-        ]
-        leg1 = ax.legend(
-            handles=dt_handles,
-            title="Day Types",
-            loc='upper center',
-            bbox_to_anchor=(0.5, -0.02),
-            ncol=len(sorted_daytypes),
-            frameon=False,
-            fontsize=14,
-            title_fontsize=16,
-        )
-        ax.add_artist(leg1)
-
-        tb_handles = [
-            mpatches.Patch(
-                facecolor='white',
-                hatch=tb_style[tb]['hatch'],
-                label=tb,
-                edgecolor='black',
-            )
-            for tb in sorted_timebrackets
-        ]
-        ax.legend(
-            handles=tb_handles,
-            title="Daily Time Brackets",
-            loc='upper center',
-            bbox_to_anchor=(0.5, -0.10),
-            ncol=len(sorted_timebrackets),
-            frameon=False,
-            fontsize=14,
-            title_fontsize=16,
         )
 
         plt.tight_layout()
@@ -1144,8 +952,8 @@ class TimeVisualizer(ComponentVisualizer):
 
         Draws a three-level diagram for a single model year:
 
-        - **Season strip** (top) — broad colour blocks showing each
-          season's proportional share of the year.
+        - **Season strip** (top) — broad blocks showing each season's 
+          proportional share of the year.
         - **Timeslice bar** (middle) — individual segments for every
           timeslice, coloured by season and hatched by daily time
           bracket (consistent with ``plot_timeslice_structure``).
@@ -1229,9 +1037,9 @@ class TimeVisualizer(ComponentVisualizer):
         )
 
         # Style maps
-        season_colors = {
+        daytype_colors = {
             s: self._color_for_index(i)
-            for i, s in enumerate(seasons)
+            for i, s in enumerate(daytypes)
         }
         bracket_hatches = {
             b: self._hatch_for_index(i)
@@ -1272,7 +1080,7 @@ class TimeVisualizer(ComponentVisualizer):
             rect = mpatches.Rectangle(
                 (cursor, y_season - h_s),
                 s_frac, 2 * h_s,
-                facecolor=season_colors[s],
+                facecolor='#cccccc',
                 edgecolor='black', linewidth=1.0,
                 alpha=0.9, zorder=3,
             )
@@ -1298,12 +1106,13 @@ class TimeVisualizer(ComponentVisualizer):
         for ts in ts_sorted:
             frac = wt[ts] / total_hours
             season = parsed[ts][0]
+            daytype = parsed[ts][1]
             bracket = parsed[ts][2]
 
             rect = mpatches.Rectangle(
                 (cursor, y_ts - h_ts),
                 frac, 2 * h_ts,
-                facecolor=season_colors[season],
+                facecolor=daytype_colors[daytype],
                 hatch=bracket_hatches[bracket],
                 edgecolor='white', linewidth=0.3,
                 alpha=0.85, zorder=3,
@@ -1333,7 +1142,7 @@ class TimeVisualizer(ComponentVisualizer):
         cursor = 0.0
         for ts in ts_sorted:
             frac = wt[ts] / total_hours
-            color = season_colors[parsed[ts][0]]
+            color = daytype_colors[parsed[ts][1]]
 
             # Coloured segment on the timeline
             ax.plot(
@@ -1351,20 +1160,7 @@ class TimeVisualizer(ComponentVisualizer):
             cursor += frac
 
         # ==========================================================
-        # 7. Dashed connecting lines at season boundaries
-        # ==========================================================
-        for s, (xs, xe) in season_spans.items():
-            color = season_colors[s]
-            for x in [xs, xe]:
-                ax.plot(
-                    [x, x],
-                    [y_season - h_s, y_snap + h_mk],
-                    color=color, linewidth=0.7,
-                    linestyle=':', alpha=0.4, zorder=1,
-                )
-
-        # ==========================================================
-        # 8. Row labels
+        # 7. Row labels
         # ==========================================================
         lx = -0.03
         ax.text(
@@ -1384,7 +1180,7 @@ class TimeVisualizer(ComponentVisualizer):
         )
 
         # ==========================================================
-        # 9. Title
+        # 8. Title
         # ==========================================================
         ax.set_title(
             f"OSeMOSYS \u2192 PyPSA Time Mapping"
@@ -1398,21 +1194,21 @@ class TimeVisualizer(ComponentVisualizer):
         )
 
         # ==========================================================
-        # 10. Legends
+        # 9. Legends
         # ==========================================================
         s_handles = [
             mpatches.Patch(
-                facecolor=season_colors[s],
-                label=s, edgecolor='black',
+                facecolor=daytype_colors[d],
+                label=d, edgecolor='black',
             )
-            for s in seasons
+            for d in daytypes
         ]
         leg1 = ax.legend(
             handles=s_handles,
-            title='Seasons',
+            title='Day Types',
             loc='upper center',
             bbox_to_anchor=(0.5, -0.05),
-            ncol=len(seasons),
+            ncol=len(daytypes),
             frameon=False,
             fontsize=12, title_fontsize=13,
         )
@@ -1437,7 +1233,7 @@ class TimeVisualizer(ComponentVisualizer):
         )
 
         # ==========================================================
-        # 11. Clean up
+        # 10. Clean up
         # ==========================================================
         ax.set_xlim(-0.15, 1.03)
         ax.set_ylim(-0.8, 3.0)
@@ -1499,7 +1295,6 @@ class TimeVisualizer(ComponentVisualizer):
         """
         import matplotlib.pyplot as plt
         import matplotlib.patches as mpatches
-        import numpy as np
         from datetime import datetime, date, timedelta
 
         self._apply_style()
@@ -1587,9 +1382,9 @@ class TimeVisualizer(ComponentVisualizer):
         brackets_sorted = sorted(ts_result.dailytimebrackets)
         daytypes_sorted = sorted(ts_result.daytypes)
 
-        season_colors = {
-            s: self._color_for_index(i)
-            for i, s in enumerate(seasons)
+        daytype_colors = {
+            d: self._color_for_index(i)
+            for i, d in enumerate(daytypes_sorted)
         }
         bracket_hatches = {
             b: self._hatch_for_index(i)
@@ -1665,7 +1460,7 @@ class TimeVisualizer(ComponentVisualizer):
 
         y_snap = 2.0       # snapshot timeline (top)
         y_ts = 0.8         # timeslice bar (middle)
-        y_season = -0.3     # season strip (bottom)
+        y_season = -0.3    # season strip (bottom)
         h_ts = 0.25        # timeslice bar half-height
         h_s = 0.18         # season strip half-height
         mk_h = 0.22        # snapshot marker half-height
@@ -1844,7 +1639,7 @@ class TimeVisualizer(ComponentVisualizer):
                 rect = mpatches.Rectangle(
                     (cursor, y_ts - h_ts),
                     norm_w, 2 * h_ts,
-                    facecolor=season_colors.get(season, '#cccccc'),
+                    facecolor=daytype_colors.get(daytype, '#cccccc'),
                     hatch=bracket_hatches.get(bracket, ''),
                     edgecolor='white', linewidth=0.3,
                     alpha=0.85, zorder=3,
@@ -1898,7 +1693,7 @@ class TimeVisualizer(ComponentVisualizer):
                 rect = mpatches.Rectangle(
                     (cursor, y_season - h_s),
                     norm_w, 2 * h_s,
-                    facecolor=season_colors[s_name],
+                    facecolor=daytype_colors[daytype],
                     edgecolor='black', linewidth=0.8,
                     alpha=0.9, zorder=3,
                 )
@@ -1959,10 +1754,10 @@ class TimeVisualizer(ComponentVisualizer):
         # ==============================================================
         s_handles = [
             mpatches.Patch(
-                facecolor=season_colors[s],
-                label=s, edgecolor='black',
+                facecolor=daytype_colors[d],
+                label=d, edgecolor='black',
             )
-            for s in seasons
+            for d in daytypes_sorted
         ]
         leg1 = ax.legend(
             handles=s_handles,
@@ -2003,27 +1798,3 @@ class TimeVisualizer(ComponentVisualizer):
 
         plt.tight_layout()
         return fig, ax
-
-    # ==================================================================
-    # Convenience entry point
-    # ==================================================================
-
-    def show(self, **kwargs) -> None:
-        """
-        Display the primary visualisation.
-
-        For :class:`TimeComponent` inputs, shows the timeslice structure
-        chart.  For PyPSA networks, shows the snapshot timeline.
-
-        Parameters
-        ----------
-        **kwargs
-            Forwarded to the appropriate plot method.
-        """
-        import matplotlib.pyplot as plt
-
-        if self._network is not None:
-            self.plot_snapshot_timeline(**kwargs)
-        else:
-            self.plot_timeslice_structure(**kwargs)
-        plt.show()

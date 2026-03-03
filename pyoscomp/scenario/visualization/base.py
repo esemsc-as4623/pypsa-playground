@@ -108,12 +108,3 @@ class ComponentVisualizer(ABC):
         keep = keep or ['bottom']
         for spine in ('top', 'right', 'left', 'bottom'):
             ax.spines[spine].set_visible(spine in keep)
-
-    @abstractmethod
-    def show(self, **kwargs) -> None:
-        """
-        Display the primary visualization for this component.
-
-        Concrete subclasses should call their main ``plot_*`` method here.
-        """
-        ...
