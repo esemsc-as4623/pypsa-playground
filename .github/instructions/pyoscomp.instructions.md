@@ -68,11 +68,10 @@ Organize code into distinct modules by responsibility. For example:
 
 ```
 translation/time/
-├── constants.py      # Immutable values, tolerance settings
 ├── structures.py     # Data classes (domain objects)
+├── helpers.py        # Helper functions for specific tasks (algorithms)
 ├── translate.py      # Transformation logic (algorithms)
-├── results.py        # Result containers (output objects)
-└── visualize.py      # Presentation logic (optional)
+└── results.py        # Result containers (output objects)
 ```
 
 **Pattern**: Each module should have ONE primary responsibility.
@@ -87,9 +86,7 @@ translation/time/
 ├─────────────────────────────────────────────────────────────────┤
 │  DOMAIN OBJECTS (structures.py: DayType, Timeslice, etc.)       │
 ├─────────────────────────────────────────────────────────────────┤
-│  HELPERS (translate.py: create_daytypes_from_dates, etc.)       │
-├─────────────────────────────────────────────────────────────────┤
-│  CONSTANTS (constants.py: TOL, ENDOFDAY, etc.)                  │
+│  HELPERS (helpers.py: create_daytypes_from_dates, etc.)         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -203,56 +200,64 @@ DayType (day-of-year ranges), and Timeslice (combined temporal slices).
 Use comprehensive docstrings with these sections **in order**:
 
 ```python
-def create_daytypes_from_dates(dates: List[date]) -> set[DayType]:
+def create_timebrackets_from_times(times: List[time]) -> Set[DailyTimeBracket]:
     """
-    Create non-overlapping DayType objects from a list of dates.
+    Create non-overlapping DailyTimeBracket objects from a list of times.
     
-    Takes a list of calendar dates and partitions the year into non-overlapping
-    day-of-year ranges. Each input date represents a SINGLE DAY DayType, with
-    gaps between dates filled by range DayTypes.
+    Takes a list of time-of-day values and partitions the 24-hour day into
+    non-overlapping brackets. Each input time represents the START of a bracket,
+    with the bracket extending until the next time (or end of day for the last bracket).
     
     Parameters
     ----------
-    dates : List[date]
-        List of datetime.date objects representing specific days of interest.
-        Dates will be normalized to year 2000 (leap year) and sorted automatically.
+    times : List[time]
+        List of datetime.time objects representing bracket start times.
+        Times will be sorted automatically. If midnight (00:00:00) is not
+        included, it will be prepended automatically.
     
     Returns
     -------
-    Set[DayType]
-        Set of DayType objects that partition the year (Jan 1 - Dec 31).
-        Includes:
-        
-        - Single-day DayTypes for each input date
-        - Range DayTypes for gaps between consecutive dates
-        - Boundary DayTypes for start/end of year if needed
-    
-    Raises
-    ------
-    ValueError
-        If dates list is empty.
+    Set[DailyTimeBracket]
+        Set of non-overlapping DailyTimeBracket objects that partition the
+        24-hour day. Each bracket has half-open interval [start, end), except
+        the final bracket which extends to ENDOFDAY (inclusive 23:59:59.999999).
     
     Notes
     -----
-    Algorithm details:
+    Special handling:
     
-    - All dates are normalized to year 2000 (leap year) for maximum inclusivity
-    - Each input date becomes a 1-day DayType
+    - If the first time is within 1 second of midnight, it's adjusted to 00:00:00
+    - If any time is within 1 second of ENDOFDAY (23:59:59.999999), it's adjusted
+      and becomes the final bracket
+    - The last bracket always extends to ENDOFDAY (inclusive)
+    - Duplicate times are automatically removed
+    
+    The function ensures complete coverage of the 24-hour day with no gaps or overlaps.
     
     Examples
     --------
-    Create DayTypes from specific dates:
+    Create day/night brackets:
     
-    >>> from datetime import date
-    >>> dates = [date(2025, 1, 1), date(2025, 6, 1)]
-    >>> daytypes = create_daytypes_from_dates(dates)
-    >>> for dt in sorted(daytypes):
-    ...     print(f"{dt.name}: {dt.duration_days(2025)} days")
+    >>> from datetime import time
+    >>> times = [time(0, 0), time(6, 0), time(18, 0)]
+    >>> brackets = create_timebrackets_from_times(times)
+    >>> for b in sorted(brackets):
+    ...     print(f"{b.hour_start} - {b.hour_end}: {b.duration_hours():.1f} hours")
+    00:00:00 - 06:00:00: 6.0 hours
+    06:00:00 - 18:00:00: 12.0 hours
+    18:00:00 - 23:59:59.999999: 6.0 hours
+    
+    Midnight is added automatically:
+    
+    >>> times = [time(12, 0)]  # Only noon
+    >>> brackets = create_timebrackets_from_times(times)
+    >>> len(brackets)
+    2  # 00:00-12:00 and 12:00-24:00
     
     See Also
     --------
-    DayType : The day-of-year range structure created by this function
-    create_timebrackets_from_times : Analogous function for time-of-day ranges
+    DailyTimeBracket : The time-of-day range structure created by this function
+    create_daytypes_from_dates : Analogous function for creating day-of-year ranges
     """
 ```
 
@@ -307,7 +312,7 @@ class DailyTimeBracket:
     hour_end : time
         End time of the bracket (exclusive, unless ENDOFDAY).
     name : str, optional
-        Bracket name. Auto-generated if not provided.
+        Bracket name. Auto-generated if not provided (e.g., "T0600_1200").
     """
     hour_start: time
     hour_end: time
@@ -316,14 +321,26 @@ class DailyTimeBracket:
     def __post_init__(self):
         self.validate()
         if not self.name:
-            self._generate_name()
+            if self.is_full_day():
+                self.name = "DAY"
+            else:
+                end_str = "2400" if self.hour_end == ENDOFDAY else self.hour_end.strftime('%H%M')
+                self.name = f"T{self.hour_start.strftime('%H%M')}_to_{end_str}"
     
     def validate(self):
-        """Validate hour_start is before hour_end."""
-        if self.hour_end != ENDOFDAY and self.hour_start >= self.hour_end:
-            raise ValueError(
-                f"hour_start ({self.hour_start}) must be before hour_end ({self.hour_end})"
-            )
+        """
+        Validate hour_start is before hour_end.
+        
+        Raises
+        ------
+        ValueError
+            If hour_start >= hour_end (excluding ENDOFDAY case).
+        """
+        if self.hour_end != ENDOFDAY:
+            if self.hour_start >= self.hour_end:
+                raise ValueError(
+                    f"hour_start ({self.hour_start}) must be before hour_end ({self.hour_end})"
+                )
 ```
 
 ### 5.2 Implement Comparison Methods for Sorting
@@ -360,11 +377,10 @@ class TimesliceResult:
     Provides validation, export methods, and encapsulates all conversion outputs.
     """
     years: List[int]
+    seasons: Set[Season]
     daytypes: Set[DayType]
     dailytimebrackets: Set[DailyTimeBracket]
     timeslices: List[Timeslice]
-    snapshot_to_timeslice: Dict[pd.Timestamp, List[Tuple[int, Timeslice]]]
-    seasons: Set[str] = field(default_factory=lambda: set("X"))
 
     def validate_coverage(self) -> bool:
         """Validate that timeslices partition the year completely."""
@@ -372,6 +388,10 @@ class TimesliceResult:
 
     def export(self) -> Dict[str, pd.DataFrame]:
         """Generate OSeMOSYS-compatible CSV DataFrames."""
+        # Implementation...
+
+    def to_csv(self, output_dir: str) -> None:
+        """Write OSeMOSYS-compatible CSV files to output_dir."""
         # Implementation...
 ```
 
@@ -386,9 +406,9 @@ def name(self) -> str:
     Returns
     -------
     str
-        Format: "Season_DayType_DailyTimeBracket"
+        Format: "Season_DayType_DailyTimeBracket" (e.g., "01_to_01_10_to_15_T0600_to_1200").
     """
-    return f"{self.season}_{self.daytype.name}_{self.dailytimebracket.name}"
+    return f"{self.season.name}_{self.daytype.name}_{self.dailytimebracket.name}"
 ```
 
 ---
@@ -409,10 +429,6 @@ def create_daytypes_from_dates(dates: List[date]) -> set[DayType]:
     """Create non-overlapping day types from dates."""
     pass
 
-def create_map(snapshots, timeslices) -> Dict:
-    """Map snapshots to timeslices."""
-    pass
-
 # AVOID: Monolithic functions that do everything
 def process_all_time_data(snapshots, years, seasons, ...):
     # 200 lines doing everything
@@ -424,30 +440,47 @@ def process_all_time_data(snapshots, years, seasons, ...):
 Main entry points should be clearly named and well-documented:
 
 ```python
-def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResult:
+def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp], List[datetime]]) -> TimesliceResult:
     """
     Convert PyPSA sequential snapshots to OSeMOSYS hierarchical timeslice structure.
     
     This is a main entry point for the translation module.
     """
-    # 1. Validate input
+    # 1. Validate input, convert, and sort
     if len(snapshots) == 0:
         raise ValueError("snapshots cannot be empty")
+    try:
+        snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
+    except (TypeError, ValueError) as e:
+        raise TypeError(
+            f"snapshots must contain datetime-like values. "
+            f"If you have date strings, convert them first with pd.to_datetime(). "
+            f"Original error: {e}"
+        ) from e
+    years = sorted(snapshots.year.unique().tolist())
     
-    # 2. Normalize input
-    snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
+    # 2. Initialize containers
+    seasons: Set[Season] = set()
+    daytypes: Set[DayType] = set()
+    dailytimebrackets: Set[DailyTimeBracket] = set()
     
-    # 3. Process using helper functions
+    # 3. Remove time component and create seasons and daytypes from dates
+    unique_dates = sorted(set(ts.date() for ts in snapshots))
+    seasons = create_seasons_from_dates(unique_dates)
     daytypes = create_daytypes_from_dates(unique_dates)
+
+    # 4. Remove date component and create dailytimebrackets from times
+    unique_times = sorted(set(ts.time() for ts in snapshots))
     dailytimebrackets = create_timebrackets_from_times(unique_times)
     
-    # 4. Compose result
-    result = TimesliceResult(...)
-    
-    # 5. Validate output
+    # 5. Create timeslice for each combination
+    # ...
+
     if not result.validate_coverage():
-        raise ValueError("Validation failed")
-    
+        raise ValueError(
+            "Timeslice structure does not cover the entire year"
+        )
+
     return result
 ```
 
@@ -474,9 +507,6 @@ def to_timeslices(snapshots):
     dailytimebrackets = create_timebrackets_from_times(unique_times)
     
     # 5. Create timeslice for each combination
-    # ...
-    
-    # 6. Map snapshots to timeslices
     # ...
 ```
 
@@ -698,7 +728,7 @@ seasons: Set[str] = field(default_factory=lambda: set("X"))
 
 ### 9.5 ❌ Avoid Overly Long Functions
 
-Functions over 50 lines are candidates for decomposition. The `create_map` function at ~70 lines is at the upper limit.
+Functions over 50 lines are candidates for decomposition.
 
 ### 9.6 ❌ Avoid Inconsistent Return Types
 
@@ -742,17 +772,14 @@ Export all public API elements:
 Time translation handling submodule for PyPSA-OSeMOSYS Comparison Framework.
 """
 
-from .constants import TOL, TIMEPRECISION, ENDOFDAY, is_leap_year, hours_in_year
-from .structures import DayType, DailyTimeBracket, Timeslice
+from .structures import Season, DayType, DailyTimeBracket, Timeslice
 from .translate import to_timeslices, to_snapshots
 from .results import TimesliceResult, SnapshotResult
+from .helpers import create_daytypes_from_dates, create_timebrackets_from_times, create_seasons_from_dates
 
 __all__ = [
-    # Constants
-    'TOL',
-    'TIMEPRECISION',
-    'ENDOFDAY',
     # Structures
+    'Season',
     'DayType', 
     'DailyTimeBracket', 
     'Timeslice', 
@@ -762,9 +789,10 @@ __all__ = [
     # Functions
     'to_timeslices',
     'to_snapshots',
-    # Utilities
-    'is_leap_year',
-    'hours_in_year',
+    # Helpers
+    'create_seasons_from_dates',
+    'create_daytypes_from_dates',
+    'create_timebrackets_from_times'
 ]
 ```
 
@@ -869,45 +897,156 @@ class DailyTimeBracket:
 See `translate.py` → `to_timeslices`:
 
 ```python
-def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResult:
+def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index, List[pd.Timestamp], List[datetime]]) -> TimesliceResult:
     """
     Convert PyPSA sequential snapshots to OSeMOSYS hierarchical timeslice structure.
     
+    Transforms PyPSA's datetime-based sequential representation into OSeMOSYS's
+    categorical hierarchical structure (seasons/daytypes/dailytimebrackets/timeslices).
+    The conversion preserves temporal coverage and duration weightings.
+    
     Parameters
     ----------
-    snapshots : pd.DatetimeIndex or pd.Index
-        PyPSA snapshot timestamps.
+    snapshots : pd.DatetimeIndex or pd.Index or List[pd.Timestamp] or List[datetime]
+        PyPSA snapshot timestamps. Must contain datetime-like values that can be
+        converted to pd.DatetimeIndex. The function extracts unique dates and times
+        to construct the OSeMOSYS time structure.
+
+        - **pd.DatetimeIndex**: Native PyPSA format (recommended)
+        - **pd.Index**: Will be converted if contains datetime-parseable values
+        - **List[pd.Timestamp]**: List of pandas Timestamp objects
+        - **List[datetime]**: List of Python datetime objects
     
     Returns
     -------
     TimesliceResult
-        Container with hierarchical timeslice structure and mapping.
+        Container with hierarchical timeslice structure and mapping from snapshots
+        to timeslices. Includes methods for validation and CSV export.
     
     Raises
     ------
     ValueError
-        If snapshots is empty or validation fails.
+        If snapshots is empty.
+    ValueError
+        If timeslice structure does not cover the entire year (validation fails).
+        This can occur if snapshots have gaps or inconsistent temporal coverage.
+    TypeError
+        If snapshots contains non-datetime objects or cannot be converted.
+    
+    Notes
+    -----
+    Conversion algorithm:
+    
+    1. **Extract years**: Identify unique years from snapshot timestamps
+    2. **Create Seasons**: Group snapshot dates into non-overlapping month(s)-of-year ranges
+    3. **Create DayTypes**: Group snapshot dates into non-overlapping day(s)-of-month(s) ranges
+    4. **Create DailyTimeBrackets**: Group snapshot times into non-overlapping time-of-day ranges
+    5. **Form Timeslices**: Create cartesian product of Seasons x DayTypes × DailyTimeBrackets
+    6. **Validate**: Ensure timeslices partition each year completely (sum to 8760/8784 hours)
+    
+    The resulting structure uses:
+    
+    - Seasons capturing month(s)-of-year granularity from snapshot dates
+    - DayTypes capturing day(s)-of-month(s) granularity from snapshot dates
+    - DailyTimeBrackets capturing time-of-day granularity from snapshot times
+    
+    Performance considerations:
+    
+    - Memory: O(n_dates × n_times) timeslices created
+    - Time complexity: O(n_snapshots × n_timeslices) for mapping
     
     Examples
     --------
+    Convert hourly snapshots for one year:
+    
     >>> snapshots = pd.date_range('2025-01-01', periods=8760, freq='H')
     >>> result = to_timeslices(snapshots)
+    >>> print(f"Created {len(result.timeslices)} timeslices")
+    Created 8928 timeslices
+    # Creates 12 Seasons, 31 DayTypes, 24 DailyTimeBrackets
+    # Note that some Timeslices will have no duration
+    >>> print(f"Years: {result.years}")
+    Years: [2025]
     >>> result.validate_coverage()
     True
+    
+    Convert daily snapshots (two time-of-day samples per day):
+    
+    >>> snapshots = pd.DatetimeIndex([
+    ...     '2025-01-01 06:00', '2025-01-01 18:00',
+    ...     '2025-01-02 06:00', '2025-01-02 18:00',
+    ...     # ... continue for full year
+    ... ])
+    >>> result = to_timeslices(snapshots)
+    >>> print(f"Years: {result.years}")
+    Years: [2025]
+    >>> print(f"Seasons: {len(result.seasons)}")
+    Seasons: 12  # One per month
+    >>> print(f"DayTypes: {len(result.daytypes)}")
+    DayTypes: 31  # One per day in longest month
+    >>> print(f"DailyTimeBrackets: {len(result.dailytimebrackets)}")
+    DailyTimeBrackets: 3  # 00:00 to 06:00, 06:00 to 18:00, 18:00-ENDOFDAY
+    >>> print(f"Timeslices: {len(result.timeslices)}")
+    Timeslices: 1116
+    
+    Export to OSeMOSYS CSV files:
+    
+    >>> result = to_timeslices(snapshots)
+    >>> csv_dict = result.export()
+    >>> import os
+    >>> os.makedirs('osemosys_scenario', exist_ok=True)
+    >>> for filename, df in csv_dict.items():
+    ...     df.to_csv(f'osemosys_scenario/{filename}.csv', index=False)
+    >>> print(f"Created {len(csv_dict)} CSV files")
+    Created 11 CSV files
+    
+    Multi-year conversion:
+    
+    >>> snapshots = pd.date_range('2026-01-01', '2028-12-31', freq='D')
+    >>> result = to_timeslices(snapshots)
+    >>> print(f"Years: {result.years}")
+    Years: [2026, 2027, 2028]
+    >>> for year in result.years:
+    ...     timeslices = result.timeslices
+    ...     total_hours = sum(ts.duration_hours(year) for ts in timeslices)
+    ...     print(f"{year}: {total_hours:.0f} hours")
+    2026: 8760 hours
+    2027: 8760 hours
+    2028: 8784 hours
+    
+    See Also
+    --------
+    to_snapshots : Convert OSeMOSYS timeslices to PyPSA snapshots (inverse operation)
+    TimesliceResult : Container class for conversion results
+    create_seasons_from_dates : Helper for creating month(s)-of-year ranges
+    create_daytypes_from_dates : Helper for creating day(s)-of-month(s) ranges
+    create_timebrackets_from_times : Helper for creating time-of-day ranges
+    Season : Month(s)-of-year range structure
+    DayType : Day(s)-of-month(s) range structure
+    DailyTimeBracket : Time-of-day range structure
+    Timeslice : Combined temporal slice structure
     """
     # 1. Validate input, convert, and sort
     if len(snapshots) == 0:
         raise ValueError("snapshots cannot be empty")
-    snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
+    try:
+        snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
+    except (TypeError, ValueError) as e:
+        raise TypeError(
+            f"snapshots must contain datetime-like values. "
+            f"If you have date strings, convert them first with pd.to_datetime(). "
+            f"Original error: {e}"
+        ) from e
     years = sorted(snapshots.year.unique().tolist())
     
     # 2. Initialize containers
+    seasons: Set[Season] = set()
     daytypes: Set[DayType] = set()
     dailytimebrackets: Set[DailyTimeBracket] = set()
-    seasons: Set[str] = set("X")
     
-    # 3. Remove time component and create daytypes from dates
+    # 3. Remove time component and create seasons and daytypes from dates
     unique_dates = sorted(set(ts.date() for ts in snapshots))
+    seasons = create_seasons_from_dates(unique_dates)
     daytypes = create_daytypes_from_dates(unique_dates)
 
     # 4. Remove date component and create dailytimebrackets from times
@@ -916,17 +1055,15 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResu
     
     # 5. Create timeslice for each combination
     timeslices = []
-    for dt in sorted(daytypes):
-        for dtb in sorted(dailytimebrackets):
-            ts = Timeslice(
-                season="X",
-                daytype=dt,
-                dailytimebracket=dtb,
-            )
-            timeslices.append(ts)
-    
-    # 6. Map snapshots to timeslices
-    map = create_map(snapshots, timeslices)
+    for s in sorted(seasons):
+        for dt in sorted(daytypes):
+            for dtb in sorted(dailytimebrackets):
+                    ts = Timeslice(
+                        season=s,
+                        daytype=dt,
+                        dailytimebracket=dtb,
+                    )
+                    timeslices.append(ts)
     
     result = TimesliceResult(
         years=years,
@@ -934,11 +1071,12 @@ def to_timeslices(snapshots: Union[pd.DatetimeIndex, pd.Index]) -> TimesliceResu
         daytypes=daytypes,
         dailytimebrackets=dailytimebrackets,
         timeslices=timeslices,
-        snapshot_to_timeslice=map,
     )
 
     if not result.validate_coverage():
-        raise ValueError("Timeslice structure does not cover the entire year")
+        raise ValueError(
+            "Timeslice structure does not cover the entire year"
+        )
 
     return result
 ```
