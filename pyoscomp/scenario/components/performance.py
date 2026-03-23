@@ -1158,6 +1158,30 @@ class PerformanceComponent(ScenarioComponent):
                 )
         return step_interpolate_dict(efficiency, self.years)
 
+    def _build_trajectory(
+        self,
+        region: str,
+        technology: str,
+        trajectory: Union[float, Dict[int, float]],
+        interpolation: str
+    ) -> List[Dict]:
+        """Build records from a scalar or trajectory dict."""
+        if isinstance(trajectory, (int, float)):
+            trajectory = {self.years[0]: float(trajectory)}
+
+        sorted_years = sorted(trajectory.keys())
+        records = []
+
+        for y in self.years:
+            val = interpolate_value(
+                y, trajectory, sorted_years, interpolation
+            )
+            records.append({
+                "REGION": region, "TECHNOLOGY": technology,
+                "YEAR": y, "VALUE": val,
+            })
+        return records
+
     def _resolve_years(
         self, years: Optional[Union[int, List[int]]]
     ) -> List[int]:

@@ -145,12 +145,21 @@ class TechnologyBuilder:
                     f"Negative capacity {val} in year {y}"
                 )
 
-        # Use shared interpolation function
-        records = interpolate_trajectory(
+        # Interpolate using shared function, then adapt field names
+        shared_records = interpolate_trajectory(
             self._region, self._technology, trajectory, 
             self._supply.years, method=interpolation
         )
-        # Convert to supply component format (add VALUE key mapping if needed)
+        # Convert from {REGION, FUEL, YEAR, VALUE} to {REGION, TECHNOLOGY, YEAR, VALUE}
+        records = [
+            {
+                "REGION": rec["REGION"],
+                "TECHNOLOGY": rec["FUEL"],  # Map FUEL to TECHNOLOGY
+                "YEAR": rec["YEAR"],
+                "VALUE": rec["VALUE"]
+            }
+            for rec in shared_records
+        ]
         self._supply.residual_capacity = self._supply.add_to_dataframe(
             self._supply.residual_capacity, records,
             key_columns=["REGION", "TECHNOLOGY", "YEAR"],
