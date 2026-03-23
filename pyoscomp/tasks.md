@@ -38,7 +38,7 @@ Before comparing temporal representation effects, **all implementation differenc
 To measure the **pure effect of temporal representation**:
 1. Hold ALL harmonizable parameters constant
 2. Vary ONLY the time discretization:
-   - PyPSA: Full 8760-hour chronology
+   - PyPSA: Full 8760/8784-hour chronology
    - OSeMOSYS: Representative timeslices (N timeslices)
 3. Measure: Storage capacity recommendation, utilization, value
 
