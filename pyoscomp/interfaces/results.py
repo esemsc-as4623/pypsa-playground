@@ -34,6 +34,31 @@ def _empty_df() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _check_required_columns(
+    df: pd.DataFrame,
+    required: frozenset,
+    table_name: str,
+) -> None:
+    """Validate that ``df`` contains all ``required`` columns."""
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"{table_name} is missing columns: {sorted(missing)}"
+        )
+
+
+def _check_non_negative(
+    df: pd.DataFrame,
+    table_name: str,
+    tol: float = -1e-8,
+) -> None:
+    """Validate that ``VALUE`` column is non-negative if present."""
+    if "VALUE" in df.columns and (df["VALUE"] < tol).any():
+        raise ValueError(
+            f"{table_name} contains negative values"
+        )
+
+
 # ------------------------------------------------------------------
 # TopologyResult
 # ------------------------------------------------------------------
@@ -214,6 +239,266 @@ class SupplyResult:
 
 
 # ------------------------------------------------------------------
+# DispatchResult
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DispatchResult:
+    """
+    Harmonized representation of operational energy flows.
+
+    Attributes
+    ----------
+    production : pd.DataFrame
+        Energy produced by technologies.
+        Columns: ``REGION``, ``TIMESLICE``, ``TECHNOLOGY``,
+        ``FUEL``, ``YEAR``, ``VALUE``.
+    use : pd.DataFrame
+        Energy consumed by technologies.
+        Columns: ``REGION``, ``TIMESLICE``, ``TECHNOLOGY``,
+        ``FUEL``, ``YEAR``, ``VALUE``.
+    curtailment : pd.DataFrame
+        Curtailed available energy.
+        Columns: ``REGION``, ``TIMESLICE``, ``TECHNOLOGY``,
+        ``YEAR``, ``VALUE``.
+    unmet_demand : pd.DataFrame
+        Unserved demand by fuel.
+        Columns: ``REGION``, ``TIMESLICE``, ``FUEL``, ``YEAR``,
+        ``VALUE``.
+    """
+
+    production: pd.DataFrame = field(default_factory=_empty_df)
+    use: pd.DataFrame = field(default_factory=_empty_df)
+    curtailment: pd.DataFrame = field(default_factory=_empty_df)
+    unmet_demand: pd.DataFrame = field(default_factory=_empty_df)
+
+    _FLOW_COLS = frozenset(
+        {"REGION", "TIMESLICE", "TECHNOLOGY", "FUEL", "YEAR", "VALUE"}
+    )
+    _CURTAIL_COLS = frozenset(
+        {"REGION", "TIMESLICE", "TECHNOLOGY", "YEAR", "VALUE"}
+    )
+    _UNMET_COLS = frozenset(
+        {"REGION", "TIMESLICE", "FUEL", "YEAR", "VALUE"}
+    )
+
+    def validate(self) -> None:
+        """Check dispatch table schemas and non-negativity."""
+        if not self.production.empty:
+            _check_required_columns(
+                self.production,
+                self._FLOW_COLS,
+                "DispatchResult.production",
+            )
+            _check_non_negative(self.production, "DispatchResult.production")
+        if not self.use.empty:
+            _check_required_columns(
+                self.use,
+                self._FLOW_COLS,
+                "DispatchResult.use",
+            )
+            _check_non_negative(self.use, "DispatchResult.use")
+        if not self.curtailment.empty:
+            _check_required_columns(
+                self.curtailment,
+                self._CURTAIL_COLS,
+                "DispatchResult.curtailment",
+            )
+            _check_non_negative(self.curtailment, "DispatchResult.curtailment")
+        if not self.unmet_demand.empty:
+            _check_required_columns(
+                self.unmet_demand,
+                self._UNMET_COLS,
+                "DispatchResult.unmet_demand",
+            )
+            _check_non_negative(
+                self.unmet_demand,
+                "DispatchResult.unmet_demand",
+            )
+
+
+# ------------------------------------------------------------------
+# StorageResult
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StorageResult:
+    """
+    Harmonized representation of storage-service variables.
+
+    Attributes
+    ----------
+    charge : pd.DataFrame
+        Charging power/energy by timeslice.
+        Columns: ``REGION``, ``TIMESLICE``, ``STORAGE_TECHNOLOGY``,
+        ``YEAR``, ``VALUE``.
+    discharge : pd.DataFrame
+        Discharging power/energy by timeslice.
+        Same columns as ``charge``.
+    state_of_charge : pd.DataFrame
+        State of charge by timeslice.
+        Same columns as ``charge``.
+    standing_loss : pd.DataFrame
+        Storage standing losses by timeslice.
+        Same columns as ``charge``.
+    throughput : pd.DataFrame
+        Annual storage throughput.
+        Columns: ``REGION``, ``STORAGE_TECHNOLOGY``, ``YEAR``,
+        ``VALUE``.
+    equivalent_cycles : pd.DataFrame
+        Annual equivalent full cycles.
+        Columns: ``REGION``, ``STORAGE_TECHNOLOGY``, ``YEAR``,
+        ``VALUE``.
+    """
+
+    charge: pd.DataFrame = field(default_factory=_empty_df)
+    discharge: pd.DataFrame = field(default_factory=_empty_df)
+    state_of_charge: pd.DataFrame = field(default_factory=_empty_df)
+    standing_loss: pd.DataFrame = field(default_factory=_empty_df)
+    throughput: pd.DataFrame = field(default_factory=_empty_df)
+    equivalent_cycles: pd.DataFrame = field(default_factory=_empty_df)
+
+    _TIMESLICE_COLS = frozenset(
+        {
+            "REGION",
+            "TIMESLICE",
+            "STORAGE_TECHNOLOGY",
+            "YEAR",
+            "VALUE",
+        }
+    )
+    _ANNUAL_COLS = frozenset(
+        {"REGION", "STORAGE_TECHNOLOGY", "YEAR", "VALUE"}
+    )
+
+    def validate(self) -> None:
+        """Check storage table schemas and value constraints."""
+        for name in (
+            "charge",
+            "discharge",
+            "state_of_charge",
+            "standing_loss",
+        ):
+            df = getattr(self, name)
+            if df.empty:
+                continue
+            _check_required_columns(
+                df,
+                self._TIMESLICE_COLS,
+                f"StorageResult.{name}",
+            )
+            _check_non_negative(df, f"StorageResult.{name}")
+
+        for name in ("throughput", "equivalent_cycles"):
+            df = getattr(self, name)
+            if df.empty:
+                continue
+            _check_required_columns(
+                df,
+                self._ANNUAL_COLS,
+                f"StorageResult.{name}",
+            )
+            _check_non_negative(df, f"StorageResult.{name}")
+
+
+# ------------------------------------------------------------------
+# EconomicsResult
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EconomicsResult:
+    """
+    Harmonized representation of cost and value decomposition.
+
+    Attributes
+    ----------
+    capex : pd.DataFrame
+        Capital expenditure by technology/year.
+        Columns: ``REGION``, ``TECHNOLOGY``, ``YEAR``, ``VALUE``.
+    fixed_opex : pd.DataFrame
+        Fixed operational cost by technology/year.
+        Same columns as ``capex``.
+    variable_opex : pd.DataFrame
+        Variable operational cost by technology/year.
+        Same columns as ``capex``.
+    salvage : pd.DataFrame
+        Salvage value by technology/year.
+        Same columns as ``capex``.
+    total_system_cost : pd.DataFrame
+        Total system cost by region/year.
+        Columns: ``REGION``, ``YEAR``, ``VALUE``.
+    """
+
+    capex: pd.DataFrame = field(default_factory=_empty_df)
+    fixed_opex: pd.DataFrame = field(default_factory=_empty_df)
+    variable_opex: pd.DataFrame = field(default_factory=_empty_df)
+    salvage: pd.DataFrame = field(default_factory=_empty_df)
+    total_system_cost: pd.DataFrame = field(default_factory=_empty_df)
+
+    _TECH_COST_COLS = frozenset(
+        {"REGION", "TECHNOLOGY", "YEAR", "VALUE"}
+    )
+    _SYSTEM_COLS = frozenset({"REGION", "YEAR", "VALUE"})
+
+    def validate(self) -> None:
+        """Check economics table schemas and value constraints."""
+        for name in ("capex", "fixed_opex", "variable_opex", "salvage"):
+            df = getattr(self, name)
+            if df.empty:
+                continue
+            _check_required_columns(
+                df,
+                self._TECH_COST_COLS,
+                f"EconomicsResult.{name}",
+            )
+
+        if not self.total_system_cost.empty:
+            _check_required_columns(
+                self.total_system_cost,
+                self._SYSTEM_COLS,
+                "EconomicsResult.total_system_cost",
+            )
+
+
+# ------------------------------------------------------------------
+# TradeResult
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TradeResult:
+    """
+    Harmonized representation of inter-regional trade flows.
+
+    Attributes
+    ----------
+    flows : pd.DataFrame
+        Directed trade flows.
+        Columns: ``REGION`` (source), ``TO_REGION`` (sink),
+        ``TIMESLICE``, ``FUEL``, ``YEAR``, ``VALUE``.
+    """
+
+    flows: pd.DataFrame = field(default_factory=_empty_df)
+
+    _FLOW_COLS = frozenset(
+        {"REGION", "TO_REGION", "TIMESLICE", "FUEL", "YEAR", "VALUE"}
+    )
+
+    def validate(self) -> None:
+        """Check trade-flow schema and value constraints."""
+        if self.flows.empty:
+            return
+        _check_required_columns(
+            self.flows,
+            self._FLOW_COLS,
+            "TradeResult.flows",
+        )
+
+
+# ------------------------------------------------------------------
 # ModelResults — aggregate container
 # ------------------------------------------------------------------
 
@@ -254,6 +539,10 @@ class ModelResults:
     model_name: str
     topology: TopologyResult
     supply: SupplyResult
+    dispatch: DispatchResult = field(default_factory=DispatchResult)
+    storage: StorageResult = field(default_factory=StorageResult)
+    economics: EconomicsResult = field(default_factory=EconomicsResult)
+    trade: TradeResult = field(default_factory=TradeResult)
     objective: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -268,6 +557,10 @@ class ModelResults:
         """
         self.topology.validate()
         self.supply.validate()
+        self.dispatch.validate()
+        self.storage.validate()
+        self.economics.validate()
+        self.trade.validate()
 
     def summary(self) -> str:
         """
@@ -290,6 +583,9 @@ class ModelResults:
             f"Regions: {self.topology.region_names}",
             f"Connections: {len(self.topology.edges)}",
             f"Technologies with capacity: {n_techs}",
+            f"Dispatch rows: {len(self.dispatch.production)}",
+            f"Storage rows: {len(self.storage.charge)}",
+            f"Trade rows: {len(self.trade.flows)}",
             f"Objective: {self.objective:.4f}",
         ]
         return "\n".join(lines)
@@ -354,6 +650,42 @@ def compare(
                 a.objective - b.objective,
             ],
         }
+    )
+
+    # --- dispatch comparison (production only for now) ---
+    result["dispatch_production"] = _compare_optional_value_table(
+        a.dispatch.production,
+        b.dispatch.production,
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "TIMESLICE", "TECHNOLOGY", "FUEL", "YEAR"],
+    )
+
+    # --- storage comparison (throughput only for now) ---
+    result["storage_throughput"] = _compare_optional_value_table(
+        a.storage.throughput,
+        b.storage.throughput,
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "STORAGE_TECHNOLOGY", "YEAR"],
+    )
+
+    # --- economics comparison (total cost by year/region) ---
+    result["economics_total_system_cost"] = _compare_optional_value_table(
+        a.economics.total_system_cost,
+        b.economics.total_system_cost,
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "YEAR"],
+    )
+
+    # --- trade comparison ---
+    result["trade_flows"] = _compare_optional_value_table(
+        a.trade.flows,
+        b.trade.flows,
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "TO_REGION", "TIMESLICE", "FUEL", "YEAR"],
     )
 
     return result
@@ -421,6 +753,50 @@ def _compare_supply(
     merged = pd.merge(
         df_a[join_cols + [col_a]],
         df_b[join_cols + [col_b]],
+        on=join_cols,
+        how="outer",
+    )
+    merged[col_a] = merged[col_a].fillna(0.0)
+    merged[col_b] = merged[col_b].fillna(0.0)
+    merged["DIFF"] = merged[col_a] - merged[col_b]
+    merged["MATCH"] = np.abs(merged["DIFF"]) < 1e-4
+
+    return merged.sort_values(join_cols).reset_index(drop=True)
+
+
+def _compare_optional_value_table(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    model_a: str,
+    model_b: str,
+    join_cols: List[str],
+) -> pd.DataFrame:
+    """
+    Compare VALUE tables if present in either model result.
+
+    Returns an empty DataFrame when both inputs are empty.
+    """
+    if df_a.empty and df_b.empty:
+        return pd.DataFrame()
+
+    col_a = model_a
+    col_b = model_b
+
+    left = pd.DataFrame(columns=join_cols + [col_a])
+    right = pd.DataFrame(columns=join_cols + [col_b])
+
+    if not df_a.empty:
+        left = df_a[join_cols + ["VALUE"]].rename(
+            columns={"VALUE": col_a}
+        )
+    if not df_b.empty:
+        right = df_b[join_cols + ["VALUE"]].rename(
+            columns={"VALUE": col_b}
+        )
+
+    merged = pd.merge(
+        left,
+        right,
         on=join_cols,
         how="outer",
     )

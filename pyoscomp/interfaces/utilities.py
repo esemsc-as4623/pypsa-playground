@@ -14,6 +14,7 @@ Design notes:
 """
 
 import pandas as pd
+from typing import TYPE_CHECKING
 from pathlib import Path
 from typing import Union, FrozenSet, Any
 
@@ -25,6 +26,9 @@ from .parameters import (
     PerformanceParameters,
     EconomicsParameters,
 )
+
+if TYPE_CHECKING:
+    from .harmonization import HarmonizationTolerances
 from .containers import ScenarioData
 
 
@@ -199,7 +203,12 @@ class ScenarioDataLoader:
     """
 
     @staticmethod
-    def from_directory(scenario_dir: str, validate: bool = True) -> 'ScenarioData':
+    def from_directory(
+        scenario_dir: str,
+        validate: bool = True,
+        strict_protocol: bool = False,
+        harmonization_tolerances: 'HarmonizationTolerances' = None,
+    ) -> 'ScenarioData':
         """
         Load ScenarioData from a directory containing CSV files.
 
@@ -303,6 +312,8 @@ class ScenarioDataLoader:
             economics=economics_params,
             metadata={'source_dir': scenario_dir},
             _skip_validation=not validate,
+            _strict_protocol=strict_protocol,
+            _harmonization_tolerances=harmonization_tolerances,
         )
 
     @staticmethod
@@ -313,7 +324,9 @@ class ScenarioDataLoader:
         supply_component,
         performance_component,
         economics_component,
-        validate: bool = True
+        validate: bool = True,
+        strict_protocol: bool = False,
+        harmonization_tolerances: 'HarmonizationTolerances' = None,
     ) -> 'ScenarioData':
         """
         Construct ScenarioData from scenario component objects.
@@ -410,6 +423,8 @@ class ScenarioDataLoader:
             economics=economics_params,
             metadata={'source': 'components'},
             _skip_validation=not validate,
+            _strict_protocol=strict_protocol,
+            _harmonization_tolerances=harmonization_tolerances,
         )
 
 

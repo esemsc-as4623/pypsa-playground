@@ -28,8 +28,21 @@ from .utilities import (
 from .results import (
     TopologyResult,
     SupplyResult,
+    DispatchResult,
+    StorageResult,
+    EconomicsResult,
+    TradeResult,
     ModelResults,
     compare,
+)
+from .harmonization import (
+    HarmonizationTolerances,
+    MetricResult,
+    HarmonizationReport,
+    validate_input_harmonization,
+    validate_pypsa_translation_harmonization,
+    reconstruct_pypsa_npv,
+    compare_npv_to_osemosys,
 )
 
 __all__ = [
@@ -46,9 +59,21 @@ __all__ = [
     # Output containers
     'TopologyResult',
     'SupplyResult',
+    'DispatchResult',
+    'StorageResult',
+    'EconomicsResult',
+    'TradeResult',
     'ModelResults',
     # Comparison
     'compare',
+    # Harmonization protocol
+    'HarmonizationTolerances',
+    'MetricResult',
+    'HarmonizationReport',
+    'validate_input_harmonization',
+    'validate_pypsa_translation_harmonization',
+    'reconstruct_pypsa_npv',
+    'compare_npv_to_osemosys',
     # Utilities
     'ScenarioDataLoader',
     'ScenarioDataExporter',

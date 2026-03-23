@@ -15,7 +15,7 @@ Design principles:
 """
 
 import pandas as pd
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 
 from .sets import OSeMOSYSSets
@@ -26,6 +26,9 @@ from .parameters import (
     PerformanceParameters,
     EconomicsParameters,
 )
+
+if TYPE_CHECKING:
+    from .harmonization import HarmonizationTolerances, HarmonizationReport
 
 
 @dataclass
@@ -88,13 +91,19 @@ class ScenarioData:
 
     # Internal flag to skip validation (used by loaders during construction)
     _skip_validation: bool = field(default=False, repr=False, compare=False)
+    _strict_protocol: bool = field(default=False, repr=False, compare=False)
+    _harmonization_tolerances: Optional['HarmonizationTolerances'] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self):
         """Validate structure immediately after construction unless skipped."""
         if not self._skip_validation:
             self.validate()
 
-    def validate(self) -> None:
+    def validate(self, strict_protocol: Optional[bool] = None) -> None:
         """
         Validate all cross-component references and parameter consistency.
 
@@ -118,8 +127,38 @@ class ScenarioData:
         self.performance.validate(self.sets)
         self.economics.validate(self.sets)
 
+        strict = self._strict_protocol if strict_protocol is None else strict_protocol
+        if strict:
+            report = self.validate_harmonization(
+                tolerances=self._harmonization_tolerances
+            )
+            if not report.passed:
+                failed = [m.name for m in report.metrics if not m.passed]
+                raise ValueError(
+                    "Strict harmonization protocol failed: "
+                    f"{', '.join(failed)}"
+                )
+
+    def validate_harmonization(
+        self,
+        tolerances: Optional['HarmonizationTolerances'] = None,
+    ) -> 'HarmonizationReport':
+        """Run input-layer harmonization checks on this scenario."""
+        from .harmonization import validate_input_harmonization
+
+        return validate_input_harmonization(
+            self,
+            tolerances=tolerances,
+        )
+
     @classmethod
-    def from_directory(cls, scenario_dir: str, validate: bool = True) -> 'ScenarioData':
+    def from_directory(
+        cls,
+        scenario_dir: str,
+        validate: bool = True,
+        strict_protocol: bool = False,
+        harmonization_tolerances: Optional['HarmonizationTolerances'] = None,
+    ) -> 'ScenarioData':
         """
         Load ScenarioData from a scenario directory containing CSV files.
 
@@ -143,7 +182,12 @@ class ScenarioData:
             If validation fails.
         """
         from .utilities import ScenarioDataLoader
-        return ScenarioDataLoader.from_directory(scenario_dir, validate=validate)
+        return ScenarioDataLoader.from_directory(
+            scenario_dir,
+            validate=validate,
+            strict_protocol=strict_protocol,
+            harmonization_tolerances=harmonization_tolerances,
+        )
 
     @classmethod
     def from_components(
@@ -154,7 +198,9 @@ class ScenarioData:
         supply_component,
         performance_component,
         economics_component,
-        validate: bool = True
+        validate: bool = True,
+        strict_protocol: bool = False,
+        harmonization_tolerances: Optional['HarmonizationTolerances'] = None,
     ) -> 'ScenarioData':
         """
         Construct ScenarioData from scenario component objects.
@@ -191,7 +237,9 @@ class ScenarioData:
             supply_component,
             performance_component,
             economics_component,
-            validate=validate
+            validate=validate,
+            strict_protocol=strict_protocol,
+            harmonization_tolerances=harmonization_tolerances,
         )
 
     def export_to_directory(self, scenario_dir: str) -> None:
