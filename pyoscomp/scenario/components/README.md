@@ -174,17 +174,14 @@ trajectory = {2025: 100, 2030: 121.55}  # ≈4% annual growth
 
 ## Practical Notes
 
-- Prefer replacing records through repeated set/add calls rather than direct
-    DataFrame mutation.
+- Prefer replacing records through repeated set/add calls rather than direct DataFrame mutation.
 - Choose interpolation intentionally:
     - 'step' for policy mandates and step-change events
     - 'linear' for smooth cost or parameter transitions
     - 'cagr' for technology cost curves and growth processes
-- TimeComponent normalization preserves relative weights even when seasonal
-    day counts or bracket hours do not match calendar totals exactly.
+- TimeComponent normalization preserves relative weights even when seasonal day counts or bracket hours do not match calendar totals exactly.
 - Always call `process()` on Demand and Performance before `save()`.
-- When setting profiles (demand or performance), ensure weights/factors are reasonable;
-    process() normalizes but cannot fix fundamentally broken inputs.
+- When setting profiles (demand or performance), ensure weights/factors are reasonable; process() normalizes but cannot fix fundamentally broken inputs.
 
 ## Profile Setup Guide
 
@@ -336,5 +333,3 @@ demand.set_profile(
 - Prefer assertions on output CSV semantics
     (uniqueness keys, sums to 1.0, non-negative bounds).
 - Use `component.validate()` before `component.save()` to catch errors early.
-
-## Testing Pointers
