@@ -23,6 +23,12 @@ import tempfile
 import os
 
 from .interfaces import ScenarioData
+from .interfaces.harmonization import (
+    compare_npv_to_osemosys,
+    reconstruct_pypsa_npv,
+    validate_input_harmonization,
+    validate_pypsa_translation_harmonization,
+)
 from .translation.pypsa_translator import PyPSAInputTranslator, PyPSAOutputTranslator
 from .translation.osemosys_translator import OSeMOSYSInputTranslator, OSeMOSYSOutputTranslator
 
@@ -64,6 +70,7 @@ class ModelResult:
     status: str = "not_run"
     solve_time: float = 0.0
     model_object: Any = None
+    harmonization: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -83,6 +90,7 @@ class ComparisonResult:
     pypsa: Optional[ModelResult] = None
     osemosys: Optional[ModelResult] = None
     scenario_data: Optional[ScenarioData] = None
+    harmonization: Dict[str, Any] = field(default_factory=dict)
     
     def compare_objectives(self) -> Dict[str, float]:
         """Compare objective values between models."""
@@ -141,11 +149,17 @@ def run_pypsa(
     import time
     
     result = ModelResult(model_name='pypsa')
+    result.harmonization['input'] = _serialize_report(
+        validate_input_harmonization(scenario_data)
+    )
     
     try:
         # Translate to PyPSA network
         translator = PyPSAInputTranslator(scenario_data)
         network = translator.translate()
+        result.harmonization['translation'] = _serialize_report(
+            validate_pypsa_translation_harmonization(scenario_data, network)
+        )
         
         # Run optimization
         start_time = time.time()
@@ -160,6 +174,10 @@ def run_pypsa(
         result.status = 'optimal' if status == 'ok' else str(status)
         result.objective = network.objective
         result.model_object = network
+        result.harmonization['npv_reconstructed'] = reconstruct_pypsa_npv(
+            scenario_data,
+            network,
+        )
         
         # Extract optimal capacities
         if hasattr(network.generators, 'p_nom_opt'):
@@ -173,7 +191,9 @@ def run_pypsa(
         
         # Use output translator for standardized results
         output_translator = PyPSAOutputTranslator(network)
-        result.raw_results = output_translator.translate()
+        result.raw_results = {
+            'ModelResults': output_translator.translate(),
+        }
         
         logger.info(f"PyPSA optimization completed: {result.status}, objective={result.objective:.2f}")
         
@@ -221,6 +241,9 @@ def run_osemosys(
     import importlib.resources
     
     result = ModelResult(model_name='osemosys')
+    result.harmonization['input'] = _serialize_report(
+        validate_input_harmonization(scenario_data)
+    )
     
     # Set up working directory
     if working_dir is None:
@@ -307,9 +330,10 @@ def run_osemosys(
         
         # Load results using output translator
         output_translator = OSeMOSYSOutputTranslator(str(results_dir))
-        result.raw_results = output_translator.translate()
+        result.raw_results = output_translator.results_dict
         result.objective = output_translator.get_objective()
         result.optimal_capacities = output_translator.get_optimal_capacity()
+        result.harmonization['objective_from_results_table'] = result.objective
         
         # Store dispatch if available
         if 'RateOfActivity' in result.raw_results:
@@ -389,8 +413,55 @@ def run(
         except Exception as e:
             logger.error(f"OSeMOSYS run failed: {e}")
             result.osemosys = ModelResult(model_name='osemosys', status='error')
+
+    if (
+        model == 'both'
+        and result.pypsa is not None
+        and result.osemosys is not None
+        and result.pypsa.status != 'error'
+        and result.osemosys.status != 'error'
+        and result.pypsa.model_object is not None
+        and isinstance(result.osemosys.raw_results, dict)
+    ):
+        npv_metric = compare_npv_to_osemosys(
+            scenario_data,
+            result.pypsa.model_object,
+            result.osemosys.raw_results,
+        )
+        metric_payload = {
+            'name': npv_metric.name,
+            'passed': npv_metric.passed,
+            'observed': npv_metric.observed,
+            'expected': npv_metric.expected,
+            'tolerance': npv_metric.tolerance,
+            'details': npv_metric.details,
+        }
+        result.harmonization['npv_parity'] = metric_payload
+        result.pypsa.harmonization['npv_parity_against_osemosys'] = metric_payload
+        result.osemosys.harmonization['npv_parity_against_pypsa'] = metric_payload
     
     return result
+
+
+def _serialize_report(report) -> Dict[str, Any]:
+    """Serialize HarmonizationReport for run outputs."""
+    metrics = []
+    for metric in report.metrics:
+        metrics.append(
+            {
+                'name': metric.name,
+                'passed': metric.passed,
+                'observed': metric.observed,
+                'expected': metric.expected,
+                'tolerance': metric.tolerance,
+                'details': metric.details,
+            }
+        )
+    return {
+        'scope': report.scope,
+        'passed': report.passed,
+        'metrics': metrics,
+    }
 
 
 # Convenience function to run from scenario directory
