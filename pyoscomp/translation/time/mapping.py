@@ -99,10 +99,10 @@ def create_endpoints(
 
     Notes
     -----
-    All years from min(snapshot years) to max(snapshot years) are included,
-    even if no snapshot exists in an intermediate year. This ensures correct
-    handling of snapshot periods that span year gaps (e.g., snapshots in
-    2020 and 2022 will include 2021 boundaries).
+    Only years that contain actual snapshots get year-boundary markers.
+    Intermediate years with no snapshots are not modelled and receive
+    no boundaries, which is consistent with how OSeMOSYS treats the
+    YEAR set (only listed years are active).
 
     Examples
     --------
@@ -115,12 +115,10 @@ def create_endpoints(
     create_map : Uses endpoints for snapshot-to-timeslice mapping
     """
     snapshots = pd.DatetimeIndex(pd.to_datetime(snapshots)).sort_values()
-    min_year = int(snapshots.year.min())
-    max_year = int(snapshots.year.max())
 
-    # Include year boundaries for ALL years from min to max
+    # Include year boundaries only for years that actually have snapshots
     endpoints = []
-    for year in range(min_year, max_year + 1):
+    for year in sorted(set(int(y) for y in snapshots.year)):
         soy = pd.Timestamp(year=year, month=1, day=1)
         eoy = pd.Timestamp.combine(date(year, 12, 31), ENDOFDAY)
         endpoints.append(soy)
