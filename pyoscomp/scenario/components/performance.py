@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 from .base import ScenarioComponent
 from .time import TimeComponent
+from ..interpolation import interpolate_value, step_interpolate_dict
 
 
 class PerformanceComponent(ScenarioComponent):
@@ -601,7 +602,7 @@ class PerformanceComponent(ScenarioComponent):
 
         # Build base factor mapping
         if isinstance(factor, dict):
-            factor_map = self._step_interpolate_dict(factor)
+            factor_map = step_interpolate_dict(factor, self.years)
         else:
             if not 0 <= factor <= 1:
                 raise ValueError(
@@ -670,7 +671,7 @@ class PerformanceComponent(ScenarioComponent):
         self._validate_technology(region, technology)
 
         if isinstance(availability, dict):
-            avail_map = self._step_interpolate_dict(availability)
+            avail_map = step_interpolate_dict(availability, self.years)
         else:
             if not 0 <= availability <= 1:
                 raise ValueError(
@@ -802,6 +803,20 @@ class PerformanceComponent(ScenarioComponent):
 
         self._defined_tech.add((region, technology))
 
+    def set_capacity_to_activity_unit_for_all(self, technologies, value=8760):
+        """
+        Set CapacityToActivityUnit for a list of technologies.
+
+        Parameters
+        ----------
+        technologies : iterable of str
+            List of technology identifiers.
+        value : float, default 8760
+            Conversion factor to set for each technology.
+        """
+        for tech in technologies:
+            for region in self.regions:
+                self.set_capacity_to_activity_unit(region, tech, value)
     # =========================================================================
     # Processing
     # =========================================================================
@@ -909,6 +924,7 @@ class PerformanceComponent(ScenarioComponent):
         - Activity ratios are positive.
         - CapacityFactor and AvailabilityFactor in [0, 1].
         - Capacity limits are non-negative where specified.
+        - Warn if any technology in TECHNOLOGY.csv lacks a CapacityToActivityUnit entry (default should be 8760 for MW/MWh unit system).
 
         Raises
         ------
@@ -918,6 +934,7 @@ class PerformanceComponent(ScenarioComponent):
         self._validate_activity_ratios()
         self._validate_factor_bounds()
         self._validate_capacity_limits()
+        self._validate_capacity_to_activity_units()
 
     def _validate_activity_ratios(self) -> None:
         """Validate activity ratio consistency."""
@@ -980,6 +997,23 @@ class PerformanceComponent(ScenarioComponent):
                         "TotalAnnualMaxCapacity for:\n"
                         + bad.to_string()
                     )
+                
+    def _validate_capacity_to_activity_units(self) -> None:
+        missing_cau = []
+        if hasattr(self, '_technologies') and hasattr(self, 'capacity_to_activity_unit'):
+            techs = set(self._technologies)
+            if not self.capacity_to_activity_unit.empty:
+                techs_with_cau = set(self.capacity_to_activity_unit['TECHNOLOGY'].astype(str))
+            else:
+                techs_with_cau = set()
+            missing_cau = sorted(techs - techs_with_cau)
+        if missing_cau:
+            import warnings
+            warnings.warn(
+                f"The following technologies in TECHNOLOGY.csv lack a CapacityToActivityUnit entry. "
+                f"Default should be 8760 for MW/MWh unit system: {missing_cau}",
+                UserWarning
+            )
 
     # =========================================================================
     # Internal Helpers
@@ -1122,21 +1156,7 @@ class PerformanceComponent(ScenarioComponent):
                 raise ValueError(
                     f"Efficiency for year {y} must be in (0, 1]"
                 )
-        return self._step_interpolate_dict(efficiency)
-
-    def _step_interpolate_dict(
-        self, data: Dict[int, float]
-    ) -> Dict[int, float]:
-        """Step-interpolate {year: value} to all model years."""
-        sorted_years = sorted(data.keys())
-        result = {}
-        for y in self.years:
-            prev = [ey for ey in sorted_years if ey <= y]
-            if prev:
-                result[y] = data[max(prev)]
-            else:
-                result[y] = data[min(sorted_years)]
-        return result
+        return step_interpolate_dict(efficiency, self.years)
 
     def _resolve_years(
         self, years: Optional[Union[int, List[int]]]
@@ -1147,62 +1167,6 @@ class PerformanceComponent(ScenarioComponent):
         elif isinstance(years, int):
             return [years]
         return years
-
-    def _build_trajectory(
-        self,
-        region: str,
-        technology: str,
-        trajectory: Union[float, Dict[int, float]],
-        interpolation: str
-    ) -> List[Dict]:
-        """Build records from a scalar or trajectory dict."""
-        if isinstance(trajectory, (int, float)):
-            trajectory = {self.years[0]: float(trajectory)}
-
-        sorted_years = sorted(trajectory.keys())
-        records = []
-
-        for y in self.years:
-            val = self._interpolate_value(
-                y, trajectory, sorted_years, interpolation
-            )
-            records.append({
-                "REGION": region, "TECHNOLOGY": technology,
-                "YEAR": y, "VALUE": val,
-            })
-        return records
-
-    def _interpolate_value(
-        self,
-        year: int,
-        trajectory: Dict[int, float],
-        sorted_years: List[int],
-        method: str
-    ) -> float:
-        """Interpolate value for a single year."""
-        first_yr = sorted_years[0]
-        last_yr = sorted_years[-1]
-
-        if year < first_yr:
-            return trajectory[first_yr]
-        if year > last_yr:
-            return trajectory[last_yr]
-        if year in trajectory:
-            return trajectory[year]
-
-        for i in range(len(sorted_years) - 1):
-            y_start = sorted_years[i]
-            y_end = sorted_years[i + 1]
-            if y_start <= year < y_end:
-                v_start = trajectory[y_start]
-                v_end = trajectory[y_end]
-                if method == 'linear':
-                    ratio = (year - y_start) / (y_end - y_start)
-                    return v_start + ratio * (v_end - v_start)
-                else:
-                    return v_start
-
-        return trajectory[last_yr]
 
     def _apply_timeslice_weights(
         self,

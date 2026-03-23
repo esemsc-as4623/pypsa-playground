@@ -481,9 +481,9 @@ class ScenarioDataExporter:
 
         # Export supply parameters
         save_param_csv(data.supply.residual_capacity, path / 'ResidualCapacity.csv')
+        save_param_csv(data.supply.operational_life, path / 'OperationalLife.csv')
 
         # Export performance parameters
-        save_param_csv(data.performance.operational_life, path / 'OperationalLife.csv')
         save_param_csv(data.performance.capacity_to_activity_unit, path / 'CapacityToActivityUnit.csv')
         save_param_csv(data.performance.input_activity_ratio, path / 'InputActivityRatio.csv')
         save_param_csv(data.performance.output_activity_ratio, path / 'OutputActivityRatio.csv')

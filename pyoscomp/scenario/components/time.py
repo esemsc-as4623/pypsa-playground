@@ -20,6 +20,7 @@ The translation/time module handles conversion between these paradigms.
 
 import math
 import os
+import warnings
 import pandas as pd
 from decimal import Decimal, getcontext
 from typing import Dict, List, Optional, Tuple, Union
@@ -478,14 +479,22 @@ class TimeComponent(ScenarioComponent):
         # Warn if values don't match expected totals
         ref_year = years[0]
         if abs(sum(seasons.values()) - days_in_year(ref_year)) > 1:
-            print(
-                f"WARNING: Season days sum to {sum(seasons.values())}, "
-                f"expected {days_in_year(ref_year)}. Values will be normalized."
+            warnings.warn(
+                (
+                    f"Season days sum to {sum(seasons.values())}, "
+                    f"expected {days_in_year(ref_year)}. "
+                    "Values will be normalized."
+                ),
+                UserWarning,
             )
         if abs(sum(brackets.values()) - HOURS_PER_DAY) > 0.001:
-            print(
-                f"WARNING: Bracket hours sum to {sum(brackets.values())}, "
-                f"expected {HOURS_PER_DAY}. Values will be normalized."
+            warnings.warn(
+                (
+                    f"Bracket hours sum to {sum(brackets.values())}, "
+                    f"expected {HOURS_PER_DAY}. "
+                    "Values will be normalized."
+                ),
+                UserWarning,
             )
 
         # Normalize to fractions
@@ -575,10 +584,6 @@ class TimeComponent(ScenarioComponent):
     def _sanitize(self, name: str) -> str:
         """Replace underscores to avoid naming ambiguity."""
         return name.replace("_", "__")
-
-    def _unsanitize(self, name: str) -> str:
-        """Revert sanitized names."""
-        return name.replace("__", "_")
 
     def _build_timeslice_map(self) -> None:
         """Build internal timeslice → components mapping from conversion tables."""

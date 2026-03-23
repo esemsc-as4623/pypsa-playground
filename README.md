@@ -42,9 +42,9 @@ _(* create the logic for the translating the scenario as closely as possible bet
 	```
 
 3. **Run a scenario**
-3.1. *Build from scratch*
-3.2. *Bring-your-own OSeMOSYS*
-3.3. *Bring-your-own PyPSA*
+3.1 *Build from scratch*
+3.2 *Bring-your-own OSeMOSYS*
+3.3 *Bring-your-own PyPSA*
 
 ## Project Structure
 ```

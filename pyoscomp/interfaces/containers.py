@@ -256,9 +256,9 @@ class ScenarioData:
 
         # Supply parameters
         result['ResidualCapacity'] = self.supply.residual_capacity.copy()
+        result['OperationalLife'] = self.supply.operational_life.copy()
 
         # Performance parameters
-        result['OperationalLife'] = self.performance.operational_life.copy()
         result['CapacityToActivityUnit'] = self.performance.capacity_to_activity_unit.copy()
         result['InputActivityRatio'] = self.performance.input_activity_ratio.copy()
         result['OutputActivityRatio'] = self.performance.output_activity_ratio.copy()
@@ -320,8 +320,8 @@ class ScenarioData:
             'AccumulatedAnnualDemand': self.demand.accumulated_annual_demand,
             # Supply parameters
             'ResidualCapacity': self.supply.residual_capacity,
+            'OperationalLife': self.supply.operational_life,
             # Performance parameters
-            'OperationalLife': self.performance.operational_life,
             'CapacityToActivityUnit': self.performance.capacity_to_activity_unit,
             'InputActivityRatio': self.performance.input_activity_ratio,
             'OutputActivityRatio': self.performance.output_activity_ratio,

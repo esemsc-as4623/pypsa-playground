@@ -10,8 +10,8 @@ import os
 from typing import Tuple
 import importlib.resources
 
-from ..interfaces import ScenarioData
-
+from pyoscomp.interfaces import ScenarioData
+from pyoscomp.translation import OSeMOSYSInputTranslator
 
 class OSeMOSYSRunner:
     """
@@ -19,7 +19,7 @@ class OSeMOSYSRunner:
     Can be constructed from a ScenarioData object or from a directory of scenario CSVs.
     """
 
-    def __init__(self, scenario_dir: str,
+    def __init__(self, scenario_dir: str, scenario_name: str = "scenario1",
                  modelfile: str = None, configfile: str = None,
                  use_otoole: bool = True):
         """
@@ -44,6 +44,7 @@ class OSeMOSYSRunner:
             configfile = importlib.resources.files("pyoscomp").joinpath("OSeMOSYS_config.yaml")
         self.configfile = configfile # Config file path (OSeMOSYS_config.yaml)
         self.use_otoole = use_otoole
+        self.scenario_name = scenario_name
         os.makedirs(self.setup_dir, exist_ok=True)
         os.makedirs(self.results_dir, exist_ok=True)
 
@@ -64,20 +65,14 @@ class OSeMOSYSRunner:
         OSeMOSYSRunner
             Configured runner instance
         """
-        # Save scenario data to directory if not already saved
-        if hasattr(scenario_data, 'directory') and scenario_data.directory:
-            input_dir = scenario_data.directory
-        else:
-            # Save to a temp directory if not present
-            import tempfile
-            input_dir = tempfile.mkdtemp(prefix="scenario_")
-            scenario_data.save_to_directory(input_dir)
-        setup_dir = os.path.join(input_dir, "SETUP")
+        import tempfile
+        scenario_dir = tempfile.mkdtemp(prefix="pyoscomp_osemosys_")
+        setup_dir = os.path.join(scenario_dir, "SETUP")
         os.makedirs(setup_dir, exist_ok=True)
-        # If scenario_data.save_to_directory supports a target directory, ensure files are in SETUP
-        # Otherwise, move files manually if needed (not implemented here)
-        return cls(scenario_dir=input_dir, use_otoole=use_otoole)
-
+        translator = OSeMOSYSInputTranslator(scenario_data)
+        translator.export_to_csv(setup_dir)
+        return cls(scenario_dir=scenario_dir, use_otoole=use_otoole)
+        
     def write_input_files_otoole(self) -> Tuple[str, str]:
         """
         Use otoole to convert CSVs to datafile and config.
@@ -92,7 +87,7 @@ class OSeMOSYSRunner:
         Paths to datafile and configfile.
         """
         input_dir = self.setup_dir
-        datafile = os.path.join(self.scenario_dir, "scenario1.txt")
+        datafile = os.path.join(self.scenario_dir, f"{self.scenario_name}.txt")
         cmd = [
             "otoole", "convert", "csv", "datafile",
             input_dir, datafile, self.configfile
@@ -107,8 +102,8 @@ class OSeMOSYSRunner:
         """
         if self.use_otoole:
             datafile, configfile = self.write_input_files_otoole()
-            solution_file = os.path.join(self.scenario_dir, "scenario1.sol")
-            glp_file = os.path.join(self.scenario_dir, "scenario1.glp")
+            solution_file = os.path.join(self.scenario_dir, f"{self.scenario_name}.sol")
+            glp_file = os.path.join(self.scenario_dir, f"{self.scenario_name}.glp")
             cmd = [
                 "glpsol",
                 "-m", self.modelfile,

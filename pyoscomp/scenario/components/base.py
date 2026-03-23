@@ -21,9 +21,9 @@ import importlib.resources
 import pandas as pd
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Any, Union
+from typing import Dict, List, Optional, Set, Any
 
-from ..validation import SchemaRegistry, validate_csv
+from pyoscomp.scenario.validation import SchemaRegistry, validate_csv
 
 
 class ScenarioComponent(ABC):
