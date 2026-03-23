@@ -802,6 +802,20 @@ class PerformanceComponent(ScenarioComponent):
 
         self._defined_tech.add((region, technology))
 
+    def set_capacity_to_activity_unit_for_all(self, technologies, value=8760):
+        """
+        Set CapacityToActivityUnit for a list of technologies.
+
+        Parameters
+        ----------
+        technologies : iterable of str
+            List of technology identifiers.
+        value : float, default 8760
+            Conversion factor to set for each technology.
+        """
+        for tech in technologies:
+            for region in self.regions:
+                self.set_capacity_to_activity_unit(region, tech, value)
     # =========================================================================
     # Processing
     # =========================================================================
@@ -909,6 +923,7 @@ class PerformanceComponent(ScenarioComponent):
         - Activity ratios are positive.
         - CapacityFactor and AvailabilityFactor in [0, 1].
         - Capacity limits are non-negative where specified.
+        - Warn if any technology in TECHNOLOGY.csv lacks a CapacityToActivityUnit entry (default should be 8760 for MW/MWh unit system).
 
         Raises
         ------
@@ -918,6 +933,7 @@ class PerformanceComponent(ScenarioComponent):
         self._validate_activity_ratios()
         self._validate_factor_bounds()
         self._validate_capacity_limits()
+        self._validate_capacity_to_activity_units()
 
     def _validate_activity_ratios(self) -> None:
         """Validate activity ratio consistency."""
@@ -980,6 +996,23 @@ class PerformanceComponent(ScenarioComponent):
                         "TotalAnnualMaxCapacity for:\n"
                         + bad.to_string()
                     )
+                
+    def _validate_capacity_to_activity_units(self) -> None:
+        missing_cau = []
+        if hasattr(self, '_technologies') and hasattr(self, 'capacity_to_activity_unit'):
+            techs = set(self._technologies)
+            if not self.capacity_to_activity_unit.empty:
+                techs_with_cau = set(self.capacity_to_activity_unit['TECHNOLOGY'].astype(str))
+            else:
+                techs_with_cau = set()
+            missing_cau = sorted(techs - techs_with_cau)
+        if missing_cau:
+            import warnings
+            warnings.warn(
+                f"The following technologies in TECHNOLOGY.csv lack a CapacityToActivityUnit entry. "
+                f"Default should be 8760 for MW/MWh unit system: {missing_cau}",
+                UserWarning
+            )
 
     # =========================================================================
     # Internal Helpers

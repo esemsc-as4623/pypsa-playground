@@ -15,7 +15,6 @@ Prerequisites:
 - SupplyComponent (technologies must be defined for cost assignment)
 """
 
-import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Union
 
@@ -135,20 +134,6 @@ class EconomicsComponent(ScenarioComponent):
         self._save_sorted("VariableCost.csv", self.variable_cost,
                           ["REGION", "TECHNOLOGY", "MODE_OF_OPERATION", "YEAR", "VALUE"],
                           ["REGION", "TECHNOLOGY", "MODE_OF_OPERATION", "YEAR"])
-
-    def _save_sorted(
-        self,
-        filename: str,
-        df: pd.DataFrame,
-        cols: List[str],
-        sort_cols: List[str]
-    ) -> None:
-        """Helper to save DataFrame with column selection and sorting."""
-        if df.empty:
-            self.write_dataframe(filename, df)
-        else:
-            sorted_df = df[cols].sort_values(by=sort_cols)
-            self.write_dataframe(filename, sorted_df)
 
     # =========================================================================
     # User Input Methods

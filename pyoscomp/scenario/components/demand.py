@@ -19,7 +19,7 @@ Prerequisites:
 import math
 import numpy as np
 import pandas as pd
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 from .base import ScenarioComponent
 from .time import TimeComponent
@@ -124,7 +124,7 @@ class DemandComponent(ScenarioComponent):
         return list(self._defined_fuels)
 
     @property
-    def fuels(self) -> set:
+    def fuels(self) -> Set[str]:
         """Get set of unique fuel identifiers."""
         return {fuel for _, fuel in self._defined_fuels}
 
