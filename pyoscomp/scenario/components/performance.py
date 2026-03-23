@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 from .base import ScenarioComponent
 from .time import TimeComponent
+from ..interpolation import interpolate_value, step_interpolate_dict
 
 
 class PerformanceComponent(ScenarioComponent):
@@ -601,7 +602,7 @@ class PerformanceComponent(ScenarioComponent):
 
         # Build base factor mapping
         if isinstance(factor, dict):
-            factor_map = self._step_interpolate_dict(factor)
+            factor_map = step_interpolate_dict(factor, self.years)
         else:
             if not 0 <= factor <= 1:
                 raise ValueError(
@@ -670,7 +671,7 @@ class PerformanceComponent(ScenarioComponent):
         self._validate_technology(region, technology)
 
         if isinstance(availability, dict):
-            avail_map = self._step_interpolate_dict(availability)
+            avail_map = step_interpolate_dict(availability, self.years)
         else:
             if not 0 <= availability <= 1:
                 raise ValueError(
@@ -1155,31 +1156,7 @@ class PerformanceComponent(ScenarioComponent):
                 raise ValueError(
                     f"Efficiency for year {y} must be in (0, 1]"
                 )
-        return self._step_interpolate_dict(efficiency)
-
-    def _step_interpolate_dict(
-        self, data: Dict[int, float]
-    ) -> Dict[int, float]:
-        """Step-interpolate {year: value} to all model years."""
-        sorted_years = sorted(data.keys())
-        result = {}
-        for y in self.years:
-            prev = [ey for ey in sorted_years if ey <= y]
-            if prev:
-                result[y] = data[max(prev)]
-            else:
-                result[y] = data[min(sorted_years)]
-        return result
-
-    def _resolve_years(
-        self, years: Optional[Union[int, List[int]]]
-    ) -> List[int]:
-        """Resolve years argument to list."""
-        if years is None:
-            return self.years
-        elif isinstance(years, int):
-            return [years]
-        return years
+        return step_interpolate_dict(efficiency, self.years)
 
     def _build_trajectory(
         self,
@@ -1196,7 +1173,7 @@ class PerformanceComponent(ScenarioComponent):
         records = []
 
         for y in self.years:
-            val = self._interpolate_value(
+            val = interpolate_value(
                 y, trajectory, sorted_years, interpolation
             )
             records.append({
@@ -1205,37 +1182,15 @@ class PerformanceComponent(ScenarioComponent):
             })
         return records
 
-    def _interpolate_value(
-        self,
-        year: int,
-        trajectory: Dict[int, float],
-        sorted_years: List[int],
-        method: str
-    ) -> float:
-        """Interpolate value for a single year."""
-        first_yr = sorted_years[0]
-        last_yr = sorted_years[-1]
-
-        if year < first_yr:
-            return trajectory[first_yr]
-        if year > last_yr:
-            return trajectory[last_yr]
-        if year in trajectory:
-            return trajectory[year]
-
-        for i in range(len(sorted_years) - 1):
-            y_start = sorted_years[i]
-            y_end = sorted_years[i + 1]
-            if y_start <= year < y_end:
-                v_start = trajectory[y_start]
-                v_end = trajectory[y_end]
-                if method == 'linear':
-                    ratio = (year - y_start) / (y_end - y_start)
-                    return v_start + ratio * (v_end - v_start)
-                else:
-                    return v_start
-
-        return trajectory[last_yr]
+    def _resolve_years(
+        self, years: Optional[Union[int, List[int]]]
+    ) -> List[int]:
+        """Resolve years argument to list."""
+        if years is None:
+            return self.years
+        elif isinstance(years, int):
+            return [years]
+        return years
 
     def _apply_timeslice_weights(
         self,

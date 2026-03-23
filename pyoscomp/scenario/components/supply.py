@@ -32,6 +32,7 @@ import pandas as pd
 from typing import Dict, List, Set, Tuple, Union
 
 from .base import ScenarioComponent
+from ..interpolation import interpolate_trajectory
 
 
 class TechnologyBuilder:
@@ -144,10 +145,21 @@ class TechnologyBuilder:
                     f"Negative capacity {val} in year {y}"
                 )
 
-        records = self._supply._interpolate_trajectory(
-            {"REGION": self._region, "TECHNOLOGY": self._technology},
-            trajectory, interpolation,
+        # Interpolate using shared function, then adapt field names
+        shared_records = interpolate_trajectory(
+            self._region, self._technology, trajectory, 
+            self._supply.years, method=interpolation
         )
+        # Convert from {REGION, FUEL, YEAR, VALUE} to {REGION, TECHNOLOGY, YEAR, VALUE}
+        records = [
+            {
+                "REGION": rec["REGION"],
+                "TECHNOLOGY": rec["FUEL"],  # Map FUEL to TECHNOLOGY
+                "YEAR": rec["YEAR"],
+                "VALUE": rec["VALUE"]
+            }
+            for rec in shared_records
+        ]
         self._supply.residual_capacity = self._supply.add_to_dataframe(
             self._supply.residual_capacity, records,
             key_columns=["REGION", "TECHNOLOGY", "YEAR"],
@@ -625,79 +637,6 @@ class SupplyComponent(ScenarioComponent):
             modes = mode_df['VALUE'].tolist()
             for region, tech in self.defined_tech:
                 self._mode_definitions[(region, tech)] = modes
-
-    def _interpolate_trajectory(
-        self,
-        base_record: Dict,
-        trajectory: Dict[int, float],
-        method: str
-    ) -> List[Dict]:
-        """
-        Interpolate trajectory to all model years.
-
-        Parameters
-        ----------
-        base_record : dict
-            Base record fields (e.g., REGION, TECHNOLOGY).
-        trajectory : dict
-            Known points {year: value}.
-        method : {'step', 'linear'}
-            Interpolation method.
-
-        Returns
-        -------
-        list of dict
-            Records for all model years.
-        """
-        records = []
-        sorted_years = sorted(trajectory.keys())
-        first_yr, last_yr = sorted_years[0], sorted_years[-1]
-
-        # Before first point
-        for y in [yr for yr in self.years if yr < first_yr]:
-            records.append(
-                {**base_record, "YEAR": y,
-                 "VALUE": trajectory[first_yr]}
-            )
-
-        # Between points
-        for i in range(len(sorted_years) - 1):
-            y_start = sorted_years[i]
-            y_end = sorted_years[i + 1]
-            v_start = trajectory[y_start]
-            v_end = trajectory[y_end]
-            years_to_fill = [
-                yr for yr in self.years
-                if y_start <= yr < y_end
-            ]
-
-            if method == 'linear':
-                values = np.linspace(
-                    v_start, v_end, len(years_to_fill) + 1
-                )[:-1]
-            else:
-                values = [v_start] * len(years_to_fill)
-
-            for yr, val in zip(years_to_fill, values):
-                records.append(
-                    {**base_record, "YEAR": yr, "VALUE": val}
-                )
-
-        # Last point
-        if last_yr in self.years:
-            records.append(
-                {**base_record, "YEAR": last_yr,
-                 "VALUE": trajectory[last_yr]}
-            )
-
-        # After last point
-        for y in [yr for yr in self.years if yr > last_yr]:
-            records.append(
-                {**base_record, "YEAR": y,
-                 "VALUE": max(0, trajectory[last_yr])}
-            )
-
-        return records
 
     # =========================================================================
     # Representation

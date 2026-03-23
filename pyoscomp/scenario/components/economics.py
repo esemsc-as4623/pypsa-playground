@@ -19,6 +19,7 @@ import pandas as pd
 from typing import Dict, List, Optional, Union
 
 from .base import ScenarioComponent
+from ..interpolation import interpolate_value
 
 
 class EconomicsComponent(ScenarioComponent):
@@ -343,7 +344,7 @@ class EconomicsComponent(ScenarioComponent):
         records = []
 
         for y in self.years:
-            cost = self._interpolate_value(y, trajectory, sorted_years, interpolation)
+            cost = interpolate_value(y, trajectory, sorted_years, interpolation)
             record = {
                 "REGION": region,
                 "TECHNOLOGY": technology,
@@ -355,41 +356,6 @@ class EconomicsComponent(ScenarioComponent):
             records.append(record)
 
         return records
-
-    def _interpolate_value(
-        self,
-        year: int,
-        trajectory: Dict[int, float],
-        sorted_years: List[int],
-        method: str
-    ) -> float:
-        """Interpolate value for a single year."""
-        first_yr, last_yr = sorted_years[0], sorted_years[-1]
-
-        # Before first point
-        if year < first_yr:
-            return trajectory[first_yr]
-
-        # After last point
-        if year > last_yr:
-            return trajectory[last_yr]
-
-        # Exact match
-        if year in trajectory:
-            return trajectory[year]
-
-        # Between points
-        for i in range(len(sorted_years) - 1):
-            y_start, y_end = sorted_years[i], sorted_years[i + 1]
-            if y_start <= year < y_end:
-                v_start, v_end = trajectory[y_start], trajectory[y_end]
-                if method == 'linear':
-                    ratio = (year - y_start) / (y_end - y_start)
-                    return v_start + ratio * (v_end - v_start)
-                else:
-                    return v_start
-
-        return trajectory[last_yr]
 
     # =========================================================================
     # Representation

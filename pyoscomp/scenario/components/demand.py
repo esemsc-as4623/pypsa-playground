@@ -23,6 +23,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 from .base import ScenarioComponent
 from .time import TimeComponent
+from ..interpolation import interpolate_trajectory
 
 
 class DemandComponent(ScenarioComponent):
@@ -252,8 +253,8 @@ class DemandComponent(ScenarioComponent):
                 })
         else:
             # Interpolation-based
-            records = self._interpolate_trajectory(
-                region, fuel, trajectory, interpolation
+            records = interpolate_trajectory(
+                region, fuel, trajectory, self.years, method=interpolation
             )
 
         self.annual_demand_df = self.add_to_dataframe(
@@ -462,85 +463,6 @@ class DemandComponent(ScenarioComponent):
             lambda x: slice_map[x]['DailyTimeBracket']
         )
         return df
-
-    def _interpolate_trajectory(
-        self,
-        region: str,
-        fuel: str,
-        trajectory: Dict[int, float],
-        method: str
-    ) -> List[Dict]:
-        """Interpolate trajectory to cover all model years."""
-        records = []
-        sorted_years = sorted(trajectory.keys())
-        first_yr, last_yr = sorted_years[0], sorted_years[-1]
-
-        # Preceding years (extrapolate backward)
-        for y in [yr for yr in self.years if yr < first_yr]:
-            records.append({
-                "REGION": region, "FUEL": fuel, "YEAR": y,
-                "VALUE": trajectory[first_yr]
-            })
-
-        # Interpolate between points
-        for i in range(len(sorted_years) - 1):
-            y_start, y_end = sorted_years[i], sorted_years[i + 1]
-            v_start, v_end = trajectory[y_start], trajectory[y_end]
-
-            years_to_fill = [yr for yr in self.years if y_start <= yr < y_end]
-
-            if method == 'linear':
-                values = np.linspace(v_start, v_end, len(years_to_fill) + 1)[:-1]
-            elif method == 'cagr':
-                if v_start == 0:
-                    # CAGR undefined for zero start; fall back to linear
-                    values = np.linspace(v_start, v_end, len(years_to_fill) + 1)[:-1]
-                else:
-                    steps = y_end - y_start
-                    rate = (v_end / v_start) ** (1 / steps) - 1
-                    values = [v_start * ((1 + rate) ** (yr - y_start)) for yr in years_to_fill]
-            else:
-                values = [v_start] * len(years_to_fill)
-
-            for yr, val in zip(years_to_fill, values):
-                records.append({
-                    "REGION": region, "FUEL": fuel, "YEAR": yr, "VALUE": val
-                })
-
-        # Final point
-        if last_yr in self.years:
-            records.append({
-                "REGION": region, "FUEL": fuel, "YEAR": last_yr,
-                "VALUE": trajectory[last_yr]
-            })
-
-        # Extrapolate forward using the same interpolation method
-        remaining = [yr for yr in self.years if yr > last_yr]
-        if remaining:
-            last_val = trajectory[last_yr]
-            if method == 'step' or len(sorted_years) < 2:
-                extrap_values = [last_val] * len(remaining)
-            else:
-                prev_yr = sorted_years[-2]
-                prev_val = trajectory[prev_yr]
-                y_diff = last_yr - prev_yr
-                if method == 'cagr' and prev_val > 0:
-                    rate = (last_val / prev_val) ** (1 / y_diff) - 1
-                    extrap_values = [
-                        last_val * ((1 + rate) ** (yr - last_yr))
-                        for yr in remaining
-                    ]
-                else:  # linear (or cagr with zero prev_val)
-                    slope = (last_val - prev_val) / y_diff
-                    extrap_values = [
-                        last_val + slope * (yr - last_yr)
-                        for yr in remaining
-                    ]
-            for yr, val in zip(remaining, extrap_values):
-                records.append({
-                    "REGION": region, "FUEL": fuel, "YEAR": yr,
-                    "VALUE": max(0, val)
-                })
 
         return records
 
