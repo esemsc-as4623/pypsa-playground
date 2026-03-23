@@ -859,9 +859,13 @@ class PyPSAOutputTranslator(OutputTranslator):
             If the network has not been solved.
         """
         from ..interfaces.results import (
+            DispatchResult,
+            EconomicsResult,
             ModelResults,
+            StorageResult,
             TopologyResult,
             SupplyResult,
+            TradeResult,
         )
 
         network: pypsa.Network = self.model_output
@@ -873,9 +877,16 @@ class PyPSAOutputTranslator(OutputTranslator):
         supply = self._extract_supply(network)
 
         # 3. Objective value
-        objective = getattr(network, "objective", 0.0)
+        objective_raw = getattr(network, "objective", 0.0)
+        objective = float(objective_raw) if objective_raw is not None else 0.0
 
-        # 4. Metadata
+        # 4. Additional harmonized domains
+        dispatch = self._extract_dispatch(network)
+        storage = self._extract_storage(network)
+        economics = self._extract_economics(network)
+        trade = self._extract_trade(network)
+
+        # 5. Metadata
         metadata: Dict[str, object] = {
             "solver_name": getattr(network, "solver_name", None),
         }
@@ -884,7 +895,11 @@ class PyPSAOutputTranslator(OutputTranslator):
             model_name="PyPSA",
             topology=topology,
             supply=supply,
-            objective=float(objective),
+            dispatch=dispatch,
+            storage=storage,
+            economics=economics,
+            trade=trade,
+            objective=objective,
             metadata=metadata,
         )
         result.validate()
@@ -1045,3 +1060,274 @@ class PyPSAOutputTranslator(OutputTranslator):
         return SupplyResult(
             installed_capacity=installed, new_capacity=new
         )
+
+    @staticmethod
+    def _snapshot_year_and_timeslice(snapshot) -> tuple[int, str]:
+        """Convert a PyPSA snapshot index value to (YEAR, TIMESLICE)."""
+        if isinstance(snapshot, tuple) and len(snapshot) >= 2:
+            return int(snapshot[0]), str(snapshot[1])
+
+        ts = pd.Timestamp(snapshot)
+        return int(ts.year), ts.isoformat()
+
+    @staticmethod
+    def _extract_dispatch(network: "pypsa.Network") -> "DispatchResult":
+        """Build DispatchResult from generator dispatch time series."""
+        from ..interfaces.results import DispatchResult
+
+        cols = [
+            "REGION",
+            "TIMESLICE",
+            "TECHNOLOGY",
+            "FUEL",
+            "YEAR",
+            "VALUE",
+        ]
+        production_rows = []
+
+        if not network.generators_t.p.empty:
+            for snapshot in network.generators_t.p.index:
+                year, timeslice = PyPSAOutputTranslator._snapshot_year_and_timeslice(
+                    snapshot
+                )
+                row = network.generators_t.p.loc[snapshot]
+                for gen_name, value in row.items():
+                    if float(value) <= 0.0:
+                        continue
+                    gen = network.generators.loc[gen_name]
+                    region = str(gen["bus"])
+                    suffix = f"_{region}"
+                    technology = (
+                        gen_name[: -len(suffix)]
+                        if str(gen_name).endswith(suffix)
+                        else str(gen_name)
+                    )
+                    fuel = str(gen.get("carrier", "ELECTRICITY"))
+                    production_rows.append(
+                        {
+                            "REGION": region,
+                            "TIMESLICE": timeslice,
+                            "TECHNOLOGY": technology,
+                            "FUEL": fuel,
+                            "YEAR": year,
+                            "VALUE": float(value),
+                        }
+                    )
+
+        production = pd.DataFrame(production_rows, columns=cols)
+        if not production.empty:
+            production = production.groupby(cols[:-1], as_index=False)["VALUE"].sum()
+
+        return DispatchResult(
+            production=production,
+            use=pd.DataFrame(columns=cols),
+            curtailment=pd.DataFrame(
+                columns=["REGION", "TIMESLICE", "TECHNOLOGY", "YEAR", "VALUE"]
+            ),
+            unmet_demand=pd.DataFrame(
+                columns=["REGION", "TIMESLICE", "FUEL", "YEAR", "VALUE"]
+            ),
+        )
+
+    @staticmethod
+    def _extract_storage(network: "pypsa.Network") -> "StorageResult":
+        """Build StorageResult from storage unit and store time series."""
+        from ..interfaces.results import StorageResult
+
+        ts_cols = [
+            "REGION",
+            "TIMESLICE",
+            "STORAGE_TECHNOLOGY",
+            "YEAR",
+            "VALUE",
+        ]
+        annual_cols = ["REGION", "STORAGE_TECHNOLOGY", "YEAR", "VALUE"]
+
+        charge_rows = []
+        discharge_rows = []
+        soc_rows = []
+
+        if hasattr(network, "storage_units_t") and not network.storage_units.empty:
+            p_df = network.storage_units_t.p
+            soc_df = network.storage_units_t.state_of_charge
+            for snapshot in p_df.index:
+                year, timeslice = PyPSAOutputTranslator._snapshot_year_and_timeslice(
+                    snapshot
+                )
+                for name, p_value in p_df.loc[snapshot].items():
+                    meta = network.storage_units.loc[name]
+                    region = str(meta["bus"])
+                    tech = str(name)
+                    if float(p_value) < 0.0:
+                        charge_rows.append(
+                            {
+                                "REGION": region,
+                                "TIMESLICE": timeslice,
+                                "STORAGE_TECHNOLOGY": tech,
+                                "YEAR": year,
+                                "VALUE": float(-p_value),
+                            }
+                        )
+                    elif float(p_value) > 0.0:
+                        discharge_rows.append(
+                            {
+                                "REGION": region,
+                                "TIMESLICE": timeslice,
+                                "STORAGE_TECHNOLOGY": tech,
+                                "YEAR": year,
+                                "VALUE": float(p_value),
+                            }
+                        )
+
+                    if not soc_df.empty and name in soc_df.columns:
+                        soc_rows.append(
+                            {
+                                "REGION": region,
+                                "TIMESLICE": timeslice,
+                                "STORAGE_TECHNOLOGY": tech,
+                                "YEAR": year,
+                                "VALUE": float(soc_df.loc[snapshot, name]),
+                            }
+                        )
+
+        charge = pd.DataFrame(charge_rows, columns=ts_cols)
+        discharge = pd.DataFrame(discharge_rows, columns=ts_cols)
+        soc = pd.DataFrame(soc_rows, columns=ts_cols)
+        if not charge.empty:
+            charge = charge.groupby(ts_cols[:-1], as_index=False)["VALUE"].sum()
+        if not discharge.empty:
+            discharge = discharge.groupby(
+                ts_cols[:-1], as_index=False
+            )["VALUE"].sum()
+        if not soc.empty:
+            soc = soc.groupby(ts_cols[:-1], as_index=False)["VALUE"].sum()
+
+        throughput = pd.DataFrame(columns=annual_cols)
+        if not charge.empty or not discharge.empty:
+            both = pd.concat([charge, discharge], ignore_index=True)
+            throughput = both.groupby(
+                ["REGION", "STORAGE_TECHNOLOGY", "YEAR"],
+                as_index=False,
+            )["VALUE"].sum()
+
+        # Equivalent full cycles proxy: throughput / (2 * energy_capacity).
+        cycles = pd.DataFrame(columns=annual_cols)
+        if not throughput.empty and not network.storage_units.empty:
+            cap_rows = []
+            for name, row in network.storage_units.iterrows():
+                region = str(row["bus"])
+                p_nom = float(row.get("p_nom_opt", row.get("p_nom", 0.0)))
+                max_hours = float(row.get("max_hours", 0.0))
+                e_cap = p_nom * max_hours
+                if e_cap <= 0:
+                    continue
+                cap_rows.append(
+                    {
+                        "REGION": region,
+                        "STORAGE_TECHNOLOGY": str(name),
+                        "ENERGY_CAPACITY": e_cap,
+                    }
+                )
+            if cap_rows:
+                cap_df = pd.DataFrame(cap_rows)
+                cycles = throughput.merge(
+                    cap_df,
+                    on=["REGION", "STORAGE_TECHNOLOGY"],
+                    how="left",
+                )
+                cycles["VALUE"] = cycles["VALUE"] / (
+                    2.0 * cycles["ENERGY_CAPACITY"].replace(0, np.nan)
+                )
+                cycles = cycles.drop(columns=["ENERGY_CAPACITY"]).fillna(0.0)
+
+        return StorageResult(
+            charge=charge,
+            discharge=discharge,
+            state_of_charge=soc,
+            throughput=throughput,
+            equivalent_cycles=cycles,
+        )
+
+    @staticmethod
+    def _extract_economics(network: "pypsa.Network") -> "EconomicsResult":
+        """Build a conservative EconomicsResult from PyPSA objective outputs."""
+        from ..interfaces.results import EconomicsResult
+
+        years = []
+        if hasattr(network, "investment_periods") and len(network.investment_periods):
+            years = [int(y) for y in network.investment_periods]
+        elif len(network.snapshots):
+            first_snapshot = network.snapshots[0]
+            if isinstance(first_snapshot, tuple):
+                years = [int(first_snapshot[0])]
+            else:
+                years = [int(pd.Timestamp(first_snapshot).year)]
+
+        if not years:
+            return EconomicsResult()
+
+        regions = network.buses.index.tolist()
+        region = str(regions[0]) if regions else "REGION1"
+        objective_raw = getattr(network, "objective", 0.0)
+        objective = float(objective_raw) if objective_raw is not None else 0.0
+
+        total = pd.DataFrame(
+            {
+                "REGION": [region],
+                "YEAR": [int(years[0])],
+                "VALUE": [objective],
+            }
+        )
+
+        return EconomicsResult(
+            total_system_cost=total,
+        )
+
+    @staticmethod
+    def _extract_trade(network: "pypsa.Network") -> "TradeResult":
+        """Build TradeResult from inter-bus link flows when available."""
+        from ..interfaces.results import TradeResult
+
+        cols = ["REGION", "TO_REGION", "TIMESLICE", "FUEL", "YEAR", "VALUE"]
+        rows = []
+
+        if hasattr(network, "links_t") and not network.links.empty:
+            p0 = network.links_t.p0
+            if not p0.empty:
+                for snapshot in p0.index:
+                    year, timeslice = (
+                        PyPSAOutputTranslator._snapshot_year_and_timeslice(snapshot)
+                    )
+                    for link_name, value in p0.loc[snapshot].items():
+                        link = network.links.loc[link_name]
+                        bus0 = str(link.get("bus0", ""))
+                        bus1 = str(link.get("bus1", ""))
+                        if bus0 == bus1:
+                            continue
+                        flow = float(value)
+                        if flow >= 0.0:
+                            source = bus0
+                            sink = bus1
+                            magnitude = flow
+                        else:
+                            source = bus1
+                            sink = bus0
+                            magnitude = -flow
+                        if magnitude <= 0.0:
+                            continue
+                        rows.append(
+                            {
+                                "REGION": source,
+                                "TO_REGION": sink,
+                                "TIMESLICE": timeslice,
+                                "FUEL": str(link.get("carrier", "ELECTRICITY")),
+                                "YEAR": year,
+                                "VALUE": magnitude,
+                            }
+                        )
+
+        flows = pd.DataFrame(rows, columns=cols)
+        if not flows.empty:
+            flows = flows.groupby(cols[:-1], as_index=False)["VALUE"].sum()
+
+        return TradeResult(flows=flows)

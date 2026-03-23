@@ -247,9 +247,13 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
             Harmonized, frozen result object.
         """
         from ..interfaces.results import (
+            DispatchResult,
+            EconomicsResult,
             ModelResults,
+            StorageResult,
             TopologyResult,
             SupplyResult,
+            TradeResult,
         )
 
         rd = self.results_dict
@@ -263,7 +267,13 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
         # 3. Objective
         objective = self._compute_objective(rd)
 
-        # 4. Metadata
+        # 4. Additional harmonized outputs
+        dispatch = self._extract_dispatch(rd)
+        storage = self._extract_storage(rd)
+        economics = self._extract_economics(rd)
+        trade = self._extract_trade(rd)
+
+        # 5. Metadata
         metadata: Dict[str, object] = {
             "result_files": list(rd.keys()),
         }
@@ -272,6 +282,10 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
             model_name="OSeMOSYS",
             topology=topology,
             supply=supply,
+            dispatch=dispatch,
+            storage=storage,
+            economics=economics,
+            trade=trade,
             objective=objective,
             metadata=metadata,
         )
@@ -385,6 +399,14 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
         for df in rd.values():
             if "REGION" in df.columns:
                 regions.update(df["REGION"].unique())
+
+        # Add destination regions from Trade table when available.
+        trade_df = rd.get("Trade")
+        if trade_df is not None and not trade_df.empty:
+            to_col = OSeMOSYSOutputTranslator._resolve_trade_to_column(trade_df)
+            if to_col and to_col in trade_df.columns:
+                regions.update(trade_df[to_col].dropna().unique())
+
         if not regions:
             # Fallback: single unnamed region
             regions = {"REGION1"}
@@ -392,12 +414,13 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
         nodes = pd.DataFrame({"NAME": sorted(regions)})
 
         # Edges from Trade results (if present)
-        trade_df = rd.get("Trade")
         edges: pd.DataFrame
         if trade_df is not None and not trade_df.empty:
-            # Trade CSV typically has REGION, rr, YEAR, TIMESLICE, VALUE
+            # Trade CSV destination column names vary across pipelines.
             from_col = "REGION" if "REGION" in trade_df.columns else None
-            to_col = "rr" if "rr" in trade_df.columns else None
+            to_col = OSeMOSYSOutputTranslator._resolve_trade_to_column(
+                trade_df
+            )
             if from_col and to_col:
                 agg = (
                     trade_df.groupby([from_col, to_col], as_index=False)
@@ -420,6 +443,24 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
             )
 
         return TopologyResult(nodes=nodes, edges=edges)
+
+    @staticmethod
+    def _resolve_trade_to_column(trade_df: pd.DataFrame) -> Optional[str]:
+        """Resolve destination-region column name in Trade outputs."""
+        for candidate in ("TO_REGION", "rr", "_REGION", "REGION_2"):
+            if candidate in trade_df.columns:
+                return candidate
+
+        # pandas may rename duplicate REGION columns as REGION.1
+        if "REGION.1" in trade_df.columns:
+            return "REGION.1"
+
+        # Last resort: use any non-source column ending with REGION
+        for col in trade_df.columns:
+            if col != "REGION" and "REGION" in col.upper():
+                return col
+
+        return None
 
     @staticmethod
     def _extract_supply(
@@ -481,3 +522,136 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
         if obj_df is not None and not obj_df.empty:
             return float(obj_df["VALUE"].sum())
         return 0.0
+
+    @staticmethod
+    def _extract_dispatch(rd: Dict[str, pd.DataFrame]) -> "DispatchResult":
+        """Build DispatchResult from standard OSeMOSYS outputs."""
+        from ..interfaces.results import DispatchResult
+
+        flow_cols = [
+            "REGION",
+            "TIMESLICE",
+            "TECHNOLOGY",
+            "FUEL",
+            "YEAR",
+            "VALUE",
+        ]
+
+        production = rd.get("ProductionByTechnology", pd.DataFrame())
+        if not production.empty:
+            production = production[flow_cols].copy()
+        else:
+            production = pd.DataFrame(columns=flow_cols)
+
+        use = rd.get("UseByTechnology", pd.DataFrame())
+        if not use.empty:
+            use = use[flow_cols].copy()
+        else:
+            use = pd.DataFrame(columns=flow_cols)
+
+        # Not available in default OSeMOSYS outputs unless modeled explicitly.
+        curtailment = pd.DataFrame(
+            columns=["REGION", "TIMESLICE", "TECHNOLOGY", "YEAR", "VALUE"]
+        )
+        unmet = pd.DataFrame(
+            columns=["REGION", "TIMESLICE", "FUEL", "YEAR", "VALUE"]
+        )
+
+        return DispatchResult(
+            production=production,
+            use=use,
+            curtailment=curtailment,
+            unmet_demand=unmet,
+        )
+
+    @staticmethod
+    def _extract_storage(rd: Dict[str, pd.DataFrame]) -> "StorageResult":
+        """Build StorageResult from available OSeMOSYS outputs."""
+        from ..interfaces.results import StorageResult
+
+        annual_cols = ["REGION", "STORAGE_TECHNOLOGY", "YEAR", "VALUE"]
+        throughput = pd.DataFrame(columns=annual_cols)
+
+        annual_activity = rd.get(
+            "TotalTechnologyAnnualActivity", pd.DataFrame()
+        )
+        if not annual_activity.empty:
+            storage_like = annual_activity[
+                annual_activity["TECHNOLOGY"].astype(str).str.contains(
+                    "STOR|BAT", case=False
+                )
+            ]
+            if not storage_like.empty:
+                throughput = storage_like[
+                    ["REGION", "TECHNOLOGY", "YEAR", "VALUE"]
+                ].rename(columns={"TECHNOLOGY": "STORAGE_TECHNOLOGY"})
+
+        return StorageResult(
+            throughput=throughput,
+        )
+
+    @staticmethod
+    def _extract_economics(rd: Dict[str, pd.DataFrame]) -> "EconomicsResult":
+        """Build EconomicsResult from standard OSeMOSYS cost outputs."""
+        from ..interfaces.results import EconomicsResult
+
+        tech_cols = ["REGION", "TECHNOLOGY", "YEAR", "VALUE"]
+
+        capex = rd.get("CapitalInvestment", pd.DataFrame())
+        if not capex.empty:
+            capex = capex[tech_cols].copy()
+        else:
+            capex = pd.DataFrame(columns=tech_cols)
+
+        fixed = rd.get("AnnualFixedOperatingCost", pd.DataFrame())
+        if not fixed.empty:
+            fixed = fixed[tech_cols].copy()
+        else:
+            fixed = pd.DataFrame(columns=tech_cols)
+
+        variable = rd.get("AnnualVariableOperatingCost", pd.DataFrame())
+        if not variable.empty:
+            variable = variable[tech_cols].copy()
+        else:
+            variable = pd.DataFrame(columns=tech_cols)
+
+        salvage = rd.get("DiscountedSalvageValue", pd.DataFrame())
+        if not salvage.empty:
+            salvage = salvage[tech_cols].copy()
+        else:
+            salvage = pd.DataFrame(columns=tech_cols)
+
+        total = rd.get("TotalDiscountedCost", pd.DataFrame())
+        if not total.empty:
+            total = total[["REGION", "YEAR", "VALUE"]].copy()
+        else:
+            total = pd.DataFrame(columns=["REGION", "YEAR", "VALUE"])
+
+        return EconomicsResult(
+            capex=capex,
+            fixed_opex=fixed,
+            variable_opex=variable,
+            salvage=salvage,
+            total_system_cost=total,
+        )
+
+    @staticmethod
+    def _extract_trade(rd: Dict[str, pd.DataFrame]) -> "TradeResult":
+        """Build TradeResult from Trade output, if available."""
+        from ..interfaces.results import TradeResult
+
+        trade_df = rd.get("Trade", pd.DataFrame())
+        if trade_df.empty:
+            return TradeResult()
+
+        to_col = OSeMOSYSOutputTranslator._resolve_trade_to_column(trade_df)
+        if to_col is None:
+            return TradeResult()
+
+        needed = ["REGION", to_col, "TIMESLICE", "FUEL", "YEAR", "VALUE"]
+        missing = [c for c in needed if c not in trade_df.columns]
+        if missing:
+            return TradeResult()
+
+        flows = trade_df[needed].rename(columns={to_col: "TO_REGION"})
+        return TradeResult(flows=flows)
