@@ -121,12 +121,17 @@ class TestCreateEndpoints:
         assert pd.Timestamp('2020-06-15') in eps
         assert pd.Timestamp.combine(date(2020, 12, 31), ENDOFDAY) in eps
 
-    def test_multi_year_includes_intermediate(self):
-        """Snapshots in 2020 and 2022 include 2021 boundaries."""
+    def test_non_snapshot_years_excluded(self):
+        """Intermediate years not in snapshots do not get boundary markers."""
         snapshots = pd.DatetimeIndex(['2020-01-01', '2022-01-01'])
         eps = create_endpoints(snapshots)
-        assert pd.Timestamp('2021-01-01') in eps
-        assert pd.Timestamp.combine(date(2021, 12, 31), ENDOFDAY) in eps
+        assert pd.Timestamp('2021-01-01') not in eps
+        assert pd.Timestamp.combine(date(2021, 12, 31), ENDOFDAY) not in eps
+        # Only 2020 and 2022 get boundaries
+        assert pd.Timestamp('2020-01-01') in eps
+        assert pd.Timestamp.combine(date(2020, 12, 31), ENDOFDAY) in eps
+        assert pd.Timestamp('2022-01-01') in eps
+        assert pd.Timestamp.combine(date(2022, 12, 31), ENDOFDAY) in eps
 
     def test_sorted_and_unique(self):
         """Endpoints are sorted with no duplicates."""
@@ -315,18 +320,22 @@ class TestCreateMapMultiYear:
         assert abs(dur_0 - 24.0) < 0.01
 
     def test_multi_year_with_gap(self):
-        """Snapshots in 2020 and 2022 cover intermediate 2021."""
+        """Non-consecutive snapshots map each to their own year only.
+
+        Snapshots at 2020-01-01 and 2022-01-01 produce YEAR set {2020, 2022}.
+        Year 2021 is not in the model, so the 2020 snapshot maps only to 2020.
+        """
         snapshots = pd.DatetimeIndex(['2020-01-01', '2022-01-01'])
         result = to_timeslices(snapshots)
         mapping = create_map(snapshots, result.timeslices)
 
         years_0 = set(y for y, _ in mapping[snapshots[0]])
-        assert years_0 == {2020, 2021}
+        assert years_0 == {2020}
 
         dur_0 = sum(
             ts.duration_hours(y) for y, ts in mapping[snapshots[0]]
         )
-        expected = hours_in_year(2020) + hours_in_year(2021)
+        expected = hours_in_year(2020)
         assert abs(dur_0 - expected) < 0.01
 
     def test_three_annual_snapshots(self):
