@@ -1,170 +1,101 @@
+# PyOSComp
 
-**Legend**
-> names of relevant pyoscomp module(s)
+PyOSComp is a research-focused framework for comparing capacity-expansion
+recommendations from OSeMOSYS and PyPSA under harmonized inputs. The core goal is
+to isolate model-attributable uncertainty by keeping implementation differences as
+small and explicit as possible.
+
+## Related READMEs
+
+- [Documentation Index](docs_index.md)
+- [Scenario Module](scenario/README.md)
+- [Scenario Components](scenario/components/README.md)
+- [Scenario Validation](scenario/validation/README.md)
+- [Interfaces Module](interfaces/README.md)
+- [Translation Module](translation/README.md)
+- [Time Translation Submodule](translation/time/README.md)
+- [Runners Module](runners/README.md)
+
+## What Is Implemented Today
+
+- Mutable scenario authoring via `pyoscomp.scenario.components`.
+- Immutable, validated transfer layer via `pyoscomp.interfaces.ScenarioData`.
+- Input translators to both model ecosystems:
+    - `PyPSAInputTranslator` -> `pypsa.Network`
+    - `OSeMOSYSInputTranslator` -> otoole-compatible CSV/DataFrames
+- Output translators from model outputs to harmonized `ModelResults`.
+- Harmonization diagnostics at input and translation stages.
+- Unified programmatic run entrypoint in `pyoscomp.run.run`.
+
+## End-to-End Workflow
+
 ```mermaid
----
-config:
-    theme: 'neutral'
----
-block
-    A["A"]
-    B["B"]
-    C(["C"])
-    D{{"D"}}
-
-    classDef TODO color:#f66,stroke:#f66,stroke-width:2px
-    class B TODO
-
-    classDef dataclass fill:#6e6ce6,color:#fff
-    class D dataclass
+flowchart LR
+        A[Scenario Components\nmutable CSV authoring] --> B[ScenarioData\nimmutable interface]
+        B --> C[PyPSAInputTranslator]
+        B --> D[OSeMOSYSInputTranslator]
+        C --> E[PyPSA optimize]
+        D --> F[otoole + glpsol]
+        E --> G[PyPSAOutputTranslator]
+        F --> H[OSeMOSYSOutputTranslator]
+        G --> I[ModelResults]
+        H --> I
+        B --> J[Input Harmonization Report]
+        E --> K[Translation Harmonization Report]
+        I --> L[compare/divergence_analysis + plots]
 ```
 
-A, B = Class Object <span style="color:red">(TODO)</span>
-C = Function or Class Method
-D = DataClass Object
+## Module Map
 
----
-### 1. Scenario Authoring
-> modules: `scenario`, `interfaces`
-```mermaid
----
-config:
-    theme: 'neutral'
----
-block
-    columns 2
-    block:scenario
-        columns 3
-        block:group1
-            columns 1
-            T1["TopologyComponent"]
-            T2["TimeComponent"]
-            T3["DemandComponent"]
-            T4["SupplyComponent"]
-            T5["PerformanceComponent"]
-            T6["EconomicsComponent"]
-            T7["StorageComponent"]
-            T8["EmissionsComponent"]
-            T9["TargetsComponent"]
-        end
+| Module | Primary Role | Key Objects |
+|---|---|---|
+| `scenario` | Authoring OSeMOSYS-native scenario CSVs | `Scenario`, components |
+| `interfaces` | Immutable contracts + validation + harmonization checks | `ScenarioData`, `ModelResults` |
+| `translation` | Input/output translation between contracts and model formats | `PyPSAInputTranslator`, `OSeMOSYSOutputTranslator`, time translators |
+| `runners` | Model execution wrappers | `PyPSARunner`, `OSeMOSYSRunner` |
+| `run.py` | Unified orchestration helper | `run`, `run_pypsa`, `run_osemosys` |
+| `visualization` | Harmonization and divergence plotting | `HarmonizationVisualizer` |
 
-        classDef TODO color:#f66,stroke:#f66,stroke-width:2px
-        class T7 TODO
-        class T8 TODO
-        class T9 TODO
-
-        space
-
-        block:group2
-            columns 1
-            space:3
-            S1(["validate_scenario()"])
-            S2(["Scenario.build()"])
-            space:3
-        end
-
-        group1 --> group2
-    end
-    scenario --> D{{"ScenarioData"}}
-
-    classDef dataclass fill:#6e6ce6,color:#fff
-    class D dataclass
-```
-
-#### Component Usage Model
-
-Scenario components are the mutable authoring layer. Each component owns a
-defined set of CSV files and should be used in dependency order.
-
-Recommended order:
-
-1. `TopologyComponent`
-2. `TimeComponent`
-3. `SupplyComponent`
-4. `DemandComponent`
-5. `PerformanceComponent`
-6. `EconomicsComponent`
-
-Ownership principle:
-
-- Supply defines what technologies and fuel/mode relationships exist.
-- Performance defines how those technologies operate.
-- Demand defines annual volumes and profile shape.
-- Time defines the temporal axis used by demand and performance.
-
-Lifecycle pattern:
-
-1. Instantiate component with `scenario_dir`
-2. Add records using public `set_*` and `add_*` methods
-3. Call `process()` where required (`DemandComponent`,
-   `PerformanceComponent`)
-4. Optionally call `validate()` for early checks
-5. Call `save()` to write schema-validated CSVs
-
-Short usage sketch:
+## Quickstart (From Existing Scenario CSV Directory)
 
 ```python
-from pyoscomp.scenario.components import (
-    TopologyComponent,
-    TimeComponent,
-    SupplyComponent,
-    DemandComponent,
-    PerformanceComponent,
-    EconomicsComponent,
+from pyoscomp.interfaces import ScenarioData
+from pyoscomp.run import run
+
+scenario_data = ScenarioData.from_directory("path/to/scenario")
+comparison = run(
+        scenario_data,
+        model="both",
+        pypsa_options={"solver_name": "highs"},
 )
 
-scenario_dir = "path/to/scenario"
-
-topology = TopologyComponent(scenario_dir)
-topology.add_nodes(["R1"])
-topology.save()
-
-time = TimeComponent(scenario_dir)
-time.add_time_structure(
-    years=[2026, 2027],
-    seasons={"Winter": 90, "Summer": 90, "Shoulder": 185},
-    daytypes={"Weekday": 5, "Weekend": 2},
-    brackets={"Day": 16, "Night": 8},
-)
-time.save()
-
-supply = SupplyComponent(scenario_dir)
-supply.add_technology("R1", "GAS_CCGT") \
-    .with_operational_life(30) \
-    .as_conversion(input_fuel="GAS", output_fuel="ELEC")
-supply.save()
-
-demand = DemandComponent(scenario_dir)
-demand.add_annual_demand("R1", "ELEC", {2026: 100, 2027: 110})
-demand.process()
-demand.save()
-
-performance = PerformanceComponent(scenario_dir)
-performance.set_efficiency("R1", "GAS_CCGT", 0.55)
-performance.set_capacity_factor("R1", "GAS_CCGT", 0.9)
-performance.process()
-performance.save()
-
-economics = EconomicsComponent(scenario_dir)
-economics.set_discount_rate("R1", 0.05)
-economics.set_capital_cost("R1", "GAS_CCGT", {2026: 700, 2027: 680})
-economics.save()
+print(comparison.compare_objectives())
+print(comparison.harmonization.get("npv_parity"))
 ```
 
-Detailed component-level guidance lives in:
+## Important Edge Cases
 
-- `pyoscomp/scenario/components/README.md`
+- PyPSA multi-period runs require valid investment-period setup and compatible
+    snapshot index structure.
+- OSeMOSYS execution requires external binaries (`otoole`, `glpsol`) available in
+    `PATH`.
+- Time translation validates annual coverage (`8760`/`8784` hours); inconsistent
+    `YearSplit` inputs fail validation.
+- Storage is implemented, but some assumptions are structural (one StorageUnit in
+    PyPSA corresponds to an OSeMOSYS storage triplet).
 
----
-### 2. Translation to Model Input
-> modules: `interfaces`, `translation`
----
-### 3. Model Execution
-> modules: `runners`
----
-### 4. Translation of Model Output
-> modules: `translation`, `interfaces`
----
-### 5. Post-processing & Comparison
-> 
+## Known Gaps / Improvement Opportunities
+
+- CLI in `pyoscomp.__main__` is still placeholder-level.
+- `TradeComponent` authoring remains stubbed.
+- OSeMOSYS direct Pyomo path in runners is not implemented.
+- Additional strict consistency checks (for example, stronger profile-range checks
+    and broader cross-file invariants) can be expanded.
+
+## Pointers
+
+- Scenario authoring: [scenario/README.md](scenario/README.md)
+- Interfaces/contracts: [interfaces/README.md](interfaces/README.md)
+- Translation details: [translation/README.md](translation/README.md)
+- Runner details: [runners/README.md](runners/README.md)
 ---
