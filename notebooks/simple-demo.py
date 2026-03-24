@@ -7,11 +7,11 @@ app = marimo.App()
 @app.cell
 def _():
     import os
-    import subprocess
+    import shutil
     import sys
 
     sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
-    return os, subprocess
+    return os, shutil
 
 
 @app.cell
@@ -91,7 +91,15 @@ def _(os):
 
 @app.cell
 def _():
-    from pyoscomp.interfaces import ScenarioData, compare_npv_to_osemosys
+    from pyoscomp.interfaces import (
+        ScenarioData,
+        ScenarioDataExporter,
+        ScenarioDataLoader,
+        compare_npv_to_osemosys,
+        divergence_analysis,
+        validate_input_harmonization,
+        validate_pypsa_translation_harmonization,
+    )
     from pyoscomp.interfaces.results import compare
     from pyoscomp.runners.osemosys import OSeMOSYSRunner
     from pyoscomp.runners.pypsa import PyPSARunner
@@ -105,6 +113,7 @@ def _():
     )
     from pyoscomp.translation import OSeMOSYSInputTranslator, PyPSAInputTranslator
     from pyoscomp.translation.osemosys_translator import OSeMOSYSOutputTranslator
+    from pyoscomp.visualization import HarmonizationVisualizer
 
     return (
         DemandComponent,
@@ -116,28 +125,33 @@ def _():
         PyPSAInputTranslator,
         PyPSARunner,
         ScenarioData,
+        ScenarioDataExporter,
+        ScenarioDataLoader,
         SupplyComponent,
         TimeComponent,
         TopologyComponent,
+        HarmonizationVisualizer,
         compare,
         compare_npv_to_osemosys,
+        divergence_analysis,
+        validate_input_harmonization,
+        validate_pypsa_translation_harmonization,
     )
 
 
 @app.cell
-def _(RESULTS_DIR, SCENARIO_ROOT, SETUP_DIR, os, subprocess):
+def _(RESULTS_DIR, SCENARIO_ROOT, SETUP_DIR, os, shutil):
+    if os.path.exists(SCENARIO_ROOT):
+        shutil.rmtree(SCENARIO_ROOT)
+
     os.makedirs(SCENARIO_ROOT, exist_ok=True)
     os.makedirs(SETUP_DIR, exist_ok=True)
     os.makedirs(RESULTS_DIR, exist_ok=True)
     os.makedirs("results", exist_ok=True)
 
-    subprocess.call(["otoole", "setup", "csv", SETUP_DIR, "--overwrite"])
-
-    # Some otoole configs in this repo do not include DiscountRateIdv.
-    # Remove the scaffold file to prevent name-mismatch failures on convert.
-    discount_rate_idv_file = os.path.join(SETUP_DIR, "DiscountRateIdv.csv")
-    if os.path.exists(discount_rate_idv_file):
-        os.remove(discount_rate_idv_file)
+    # Native scenario initialization: component save() calls create the
+    # schema-validated CSV files directly in SETUP_DIR.
+    print(f"Initialized scenario directories at: {SCENARIO_ROOT}")
     return
 
 
@@ -240,27 +254,54 @@ def _(
 
 @app.cell
 def _(
+    SCENARIO_ROOT,
+    ScenarioDataExporter,
+    ScenarioDataLoader,
+    data,
+    os,
+):
+    interface_export_dir = os.path.join(SCENARIO_ROOT, "interface_export")
+    ScenarioDataExporter.to_directory(data, interface_export_dir)
+
+    data_roundtrip = ScenarioDataLoader.from_directory(
+        interface_export_dir,
+        validate=True,
+    )
+    print(f"ScenarioData round-trip export dir: {interface_export_dir}")
+    return data_roundtrip, interface_export_dir
+
+
+@app.cell
+def _(data_roundtrip, validate_input_harmonization):
+    input_report = validate_input_harmonization(data_roundtrip)
+    print("=== Input Harmonization Report ===")
+    print(input_report.to_frame())
+    return (input_report,)
+
+
+@app.cell
+def _(
     OSeMOSYSInputTranslator,
     PYPSA_EXPORT_DIR,
     PyPSAInputTranslator,
     TRANSLATION_DIR,
-    data,
+    data_roundtrip,
     os,
 ):
     # Translation interface demo: export both model input views.
     os.makedirs(TRANSLATION_DIR, exist_ok=True)
-    osemosys_input = OSeMOSYSInputTranslator(data)
+    osemosys_input = OSeMOSYSInputTranslator(data_roundtrip)
     osemosys_input.export_to_csv(TRANSLATION_DIR)
 
-    pypsa_network_preview = PyPSAInputTranslator(data).translate()
+    pypsa_network_preview = PyPSAInputTranslator(data_roundtrip).translate()
     pypsa_network_preview.export_to_csv_folder(PYPSA_EXPORT_DIR)
     return
 
 
 @app.cell
-def _(OSeMOSYSRunner, SCENARIO_NAME, SCENARIO_ROOT, data):
+def _(OSeMOSYSRunner, SCENARIO_NAME, SCENARIO_ROOT, data_roundtrip):
     # Runners interface demo: run OSeMOSYS from scenario directory.
-    _ = data
+    _ = data_roundtrip
     osemosys_runner = OSeMOSYSRunner(
         scenario_dir=SCENARIO_ROOT,
         scenario_name=SCENARIO_NAME,
@@ -272,16 +313,22 @@ def _(OSeMOSYSRunner, SCENARIO_NAME, SCENARIO_ROOT, data):
 
 
 @app.cell
-def _(PyPSARunner, SOLVER, data):
+def _(PyPSARunner, SOLVER, data_roundtrip):
     # Runners interface demo: run PyPSA directly from ScenarioData.
-    pypsa_runner = PyPSARunner(data, solver_name=SOLVER)
+    pypsa_runner = PyPSARunner(data_roundtrip, solver_name=SOLVER)
     network = pypsa_runner.run()
     pypsa_results = pypsa_runner.get_results()
     return network, pypsa_results
 
 
 @app.cell
-def _(OSeMOSYSOutputTranslator, compare, osemosys_results_dir, pypsa_results):
+def _(
+    OSeMOSYSOutputTranslator,
+    compare,
+    divergence_analysis,
+    osemosys_results_dir,
+    pypsa_results,
+):
     osemosys_results = OSeMOSYSOutputTranslator(osemosys_results_dir).translate()
 
     print(pypsa_results)
@@ -298,16 +345,106 @@ def _(OSeMOSYSOutputTranslator, compare, osemosys_results_dir, pypsa_results):
     print()
     print("=== Objective Comparison ===")
     print(tables["objective"])
-    return
+
+    flags, _ = divergence_analysis(pypsa_results, osemosys_results)
+    print()
+    print("=== Divergence Analysis ===")
+    if not flags:
+        print("No divergence flags detected")
+    else:
+        for _flag in flags:
+            print(_flag)
+    return flags, osemosys_results, tables
 
 
 @app.cell
-def _(RESULTS_DIR, compare_npv_to_osemosys, data, network, os):
+def _(
+    data_roundtrip,
+    network,
+    validate_pypsa_translation_harmonization,
+):
+    translation_report = validate_pypsa_translation_harmonization(
+        data_roundtrip,
+        network,
+    )
+    print("=== PyPSA Translation Harmonization Report ===")
+    print(translation_report.to_frame())
+    return (translation_report,)
+
+
+@app.cell
+def _(
+    HarmonizationVisualizer,
+    SCENARIO_ROOT,
+    TECHNOLOGIES,
+    data_roundtrip,
+    flags,
+    network,
+    osemosys_results,
+    os,
+    pypsa_results,
+):
+    visualizer = HarmonizationVisualizer()
+    fig_dir = os.path.join(SCENARIO_ROOT, "figures")
+    os.makedirs(fig_dir, exist_ok=True)
+
+    cf_technology = TECHNOLOGIES[0]["name"]
+    figures = {
+        "input_time_structure": visualizer.plot_time_structure(
+            data_roundtrip,
+            network,
+        ),
+        "input_demand_profile": visualizer.plot_demand_profile(
+            data_roundtrip,
+            network,
+        ),
+        "input_capacity_factor_profile": visualizer.plot_capacity_factor_profile(
+            data_roundtrip,
+            network,
+            cf_technology,
+        ),
+        "input_capital_cost": visualizer.plot_capital_cost_comparison(
+            data_roundtrip,
+            network,
+        ),
+        "translation_dashboard": visualizer.plot_translation_report(
+            data_roundtrip,
+            network,
+        ),
+        "output_capacity": visualizer.plot_capacity_comparison(
+            pypsa_results,
+            osemosys_results,
+        ),
+        "output_dispatch": visualizer.plot_dispatch_comparison(
+            pypsa_results,
+            osemosys_results,
+        ),
+        "output_cost": visualizer.plot_cost_comparison(
+            pypsa_results,
+            osemosys_results,
+        ),
+        "output_divergence": visualizer.plot_divergence_summary(flags),
+    }
+
+    figure_paths = {}
+    for _name, _fig in figures.items():
+        _path = os.path.join(fig_dir, f"{_name}.png")
+        _fig.savefig(_path, dpi=150, bbox_inches="tight")
+        figure_paths[_name] = _path
+
+    print("=== Harmonization Figures Written ===")
+    for _name, _path in figure_paths.items():
+        print(f"{_name}: {_path}")
+    return figure_paths, figures
+
+
+@app.cell
+def _(RESULTS_DIR, compare_npv_to_osemosys, data_roundtrip, network, os):
     import pandas as pd
 
     osemosys_cost = pd.read_csv(os.path.join(RESULTS_DIR, "TotalDiscountedCost.csv"))
     metric = compare_npv_to_osemosys(
-        scenario_data=data,
+        scenario_data=data_roundtrip,
         network=network,
         osemosys_results={"TotalDiscountedCost": osemosys_cost},
     )
