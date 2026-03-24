@@ -41,7 +41,7 @@ flowchart LR
         G --> I[ModelResults]
         H --> I
         B --> J[Input Harmonization Report]
-        E --> K[Translation Harmonization Report]
+        I --> K[Translation Harmonization Report]
         I --> L[compare/divergence_analysis + plots]
 ```
 

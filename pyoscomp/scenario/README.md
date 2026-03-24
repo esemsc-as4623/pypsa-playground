@@ -31,7 +31,7 @@ translated, and executed consistently.
 ## Build Flow
 
 ```mermaid
-flowchart TD
+flowchart LR
 		A[TopologyComponent] --> B[TimeComponent]
 		B --> C[DemandComponent]
 		B --> D[SupplyComponent]
@@ -58,7 +58,7 @@ flowchart TD
 This order matches real prerequisites in component constructors and processing
 logic.
 
-## Extended Example (Profiles + Processing)
+## Example
 
 ```python
 from pyoscomp.scenario.components import (
