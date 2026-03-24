@@ -34,7 +34,7 @@ class HarmonizationTolerances:
     demand_corr_min: float = 0.99
     cf_corr_min: float = 0.99
     cf_percentiles: Tuple[float, float, float] = (0.05, 0.5, 0.95)
-    require_single_region: bool = True
+    require_single_region: bool = False
 
 
 @dataclass(frozen=True)
@@ -749,10 +749,11 @@ def _infer_region_tech(
 ) -> Tuple[str, str]:
     if single_region:
         return regions[0], gen_name
+    # Naming convention: "{TECHNOLOGY}_{REGION}" — strip the region suffix.
     for region in regions:
-        prefix = f"{region}_"
-        if gen_name.startswith(prefix):
-            return region, gen_name[len(prefix):]
+        suffix = f"_{region}"
+        if gen_name.endswith(suffix):
+            return region, gen_name[: -len(suffix)]
     return regions[0], gen_name
 
 

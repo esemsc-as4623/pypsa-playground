@@ -495,59 +495,11 @@ class ScenarioDataExporter:
         - Creates directory structure if needed
         - Only writes non-empty DataFrames/sets
         - Follows OSeMOSYS CSV conventions
+        - Uses ScenarioData._PARAM_MAP as the single source of truth for
+          parameter names, so adding a new parameter only requires one edit.
         """
         path = Path(scenario_dir)
         path.mkdir(parents=True, exist_ok=True)
 
-        # Export sets
-        save_set_csv(data.sets.regions, path / 'REGION.csv')
-        save_set_csv(data.sets.years, path / 'YEAR.csv')
-        save_set_csv(data.sets.technologies, path / 'TECHNOLOGY.csv')
-        save_set_csv(data.sets.fuels, path / 'FUEL.csv')
-        save_set_csv(data.sets.emissions, path / 'EMISSION.csv')
-        save_set_csv(data.sets.modes, path / 'MODE_OF_OPERATION.csv')
-        save_set_csv(data.sets.timeslices, path / 'TIMESLICE.csv')
-        save_set_csv(data.sets.seasons, path / 'SEASON.csv')
-        save_set_csv(data.sets.daytypes, path / 'DAYTYPE.csv')
-        save_set_csv(data.sets.dailytimebrackets, path / 'DAILYTIMEBRACKET.csv')
-        save_set_csv(data.sets.storages, path / 'STORAGE.csv')
-
-        # Export time parameters
-        save_param_csv(data.time.year_split, path / 'YearSplit.csv')
-        save_param_csv(data.time.day_split, path / 'DaySplit.csv')
-        save_param_csv(data.time.conversion_ls, path / 'Conversionls.csv')
-        save_param_csv(data.time.conversion_ld, path / 'Conversionld.csv')
-        save_param_csv(data.time.conversion_lh, path / 'Conversionlh.csv')
-        save_param_csv(data.time.days_in_daytype, path / 'DaysInDayType.csv')
-
-        # Export demand parameters
-        save_param_csv(data.demand.specified_annual_demand, path / 'SpecifiedAnnualDemand.csv')
-        save_param_csv(data.demand.specified_demand_profile, path / 'SpecifiedDemandProfile.csv')
-        save_param_csv(data.demand.accumulated_annual_demand, path / 'AccumulatedAnnualDemand.csv')
-
-        # Export supply parameters
-        save_param_csv(data.supply.residual_capacity, path / 'ResidualCapacity.csv')
-        save_param_csv(data.supply.operational_life, path / 'OperationalLife.csv')
-
-        # Export performance parameters
-        save_param_csv(data.performance.capacity_to_activity_unit, path / 'CapacityToActivityUnit.csv')
-        save_param_csv(data.performance.input_activity_ratio, path / 'InputActivityRatio.csv')
-        save_param_csv(data.performance.output_activity_ratio, path / 'OutputActivityRatio.csv')
-        save_param_csv(data.performance.capacity_factor, path / 'CapacityFactor.csv')
-        save_param_csv(data.performance.availability_factor, path / 'AvailabilityFactor.csv')
-
-        # Export economics parameters
-        save_param_csv(data.economics.discount_rate, path / 'DiscountRate.csv')
-        save_param_csv(data.economics.discount_rate_idv, path / 'DiscountRateIdv.csv')
-        save_param_csv(data.economics.capital_cost, path / 'CapitalCost.csv')
-        save_param_csv(data.economics.variable_cost, path / 'VariableCost.csv')
-        save_param_csv(data.economics.fixed_cost, path / 'FixedCost.csv')
-
-        # Export storage parameters (all optional)
-        save_param_csv(data.storage.technology_to_storage, path / 'TechnologyToStorage.csv')
-        save_param_csv(data.storage.technology_from_storage, path / 'TechnologyFromStorage.csv')
-        save_param_csv(data.storage.capital_cost_storage, path / 'CapitalCostStorage.csv')
-        save_param_csv(data.storage.operational_life_storage, path / 'OperationalLifeStorage.csv')
-        save_param_csv(data.storage.residual_storage_capacity, path / 'ResidualStorageCapacity.csv')
-        save_param_csv(data.storage.min_storage_charge, path / 'MinStorageCharge.csv')
-        save_param_csv(data.storage.energy_ratio, path / 'StorageEnergyRatio.csv')
+        for name, df in data.to_dict().items():
+            save_param_csv(df, path / f"{name}.csv")

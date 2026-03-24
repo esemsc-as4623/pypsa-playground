@@ -15,7 +15,7 @@ Design principles:
 """
 
 import pandas as pd
-from typing import Dict, Optional, Any, TYPE_CHECKING
+from typing import Callable, ClassVar, Dict, Optional, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 
 from .sets import OSeMOSYSSets
@@ -282,60 +282,9 @@ class ScenarioData:
         >>> capital_cost = data_dict['CapitalCost']
         """
         result = {}
-
-        # Sets (as single-column DataFrames with VALUE)
-        result['REGION'] = pd.DataFrame({'VALUE': sorted(self.sets.regions)})
-        result['YEAR'] = pd.DataFrame({'VALUE': sorted(self.sets.years)})
-        result['TECHNOLOGY'] = pd.DataFrame({'VALUE': sorted(self.sets.technologies)})
-        result['FUEL'] = pd.DataFrame({'VALUE': sorted(self.sets.fuels)})
-        result['EMISSION'] = pd.DataFrame({'VALUE': sorted(self.sets.emissions)})
-        result['MODE_OF_OPERATION'] = pd.DataFrame({'VALUE': sorted(self.sets.modes)})
-        result['TIMESLICE'] = pd.DataFrame({'VALUE': sorted(self.sets.timeslices)})
-        result['SEASON'] = pd.DataFrame({'VALUE': sorted(self.sets.seasons)})
-        result['DAYTYPE'] = pd.DataFrame({'VALUE': sorted(self.sets.daytypes)})
-        result['DAILYTIMEBRACKET'] = pd.DataFrame({'VALUE': sorted(self.sets.dailytimebrackets)})
-        result['STORAGE'] = pd.DataFrame({'VALUE': sorted(self.sets.storages)})
-
-        # Time parameters
-        result['YearSplit'] = self.time.year_split.copy()
-        result['DaySplit'] = self.time.day_split.copy()
-        result['Conversionls'] = self.time.conversion_ls.copy()
-        result['Conversionld'] = self.time.conversion_ld.copy()
-        result['Conversionlh'] = self.time.conversion_lh.copy()
-        result['DaysInDayType'] = self.time.days_in_daytype.copy()
-
-        # Demand parameters
-        result['SpecifiedAnnualDemand'] = self.demand.specified_annual_demand.copy()
-        result['SpecifiedDemandProfile'] = self.demand.specified_demand_profile.copy()
-        result['AccumulatedAnnualDemand'] = self.demand.accumulated_annual_demand.copy()
-
-        # Supply parameters
-        result['ResidualCapacity'] = self.supply.residual_capacity.copy()
-        result['OperationalLife'] = self.supply.operational_life.copy()
-
-        # Performance parameters
-        result['CapacityToActivityUnit'] = self.performance.capacity_to_activity_unit.copy()
-        result['InputActivityRatio'] = self.performance.input_activity_ratio.copy()
-        result['OutputActivityRatio'] = self.performance.output_activity_ratio.copy()
-        result['CapacityFactor'] = self.performance.capacity_factor.copy()
-        result['AvailabilityFactor'] = self.performance.availability_factor.copy()
-
-        # Economics parameters
-        result['DiscountRate'] = self.economics.discount_rate.copy()
-        result['DiscountRateIdv'] = self.economics.discount_rate_idv.copy()
-        result['CapitalCost'] = self.economics.capital_cost.copy()
-        result['VariableCost'] = self.economics.variable_cost.copy()
-        result['FixedCost'] = self.economics.fixed_cost.copy()
-
-        # Storage parameters
-        result['TechnologyToStorage'] = self.storage.technology_to_storage.copy()
-        result['TechnologyFromStorage'] = self.storage.technology_from_storage.copy()
-        result['CapitalCostStorage'] = self.storage.capital_cost_storage.copy()
-        result['OperationalLifeStorage'] = self.storage.operational_life_storage.copy()
-        result['ResidualStorageCapacity'] = self.storage.residual_storage_capacity.copy()
-        result['MinStorageCharge'] = self.storage.min_storage_charge.copy()
-        result['StorageEnergyRatio'] = self.storage.energy_ratio.copy()
-
+        for name, getter in self._PARAM_MAP.items():
+            df = getter(self)
+            result[name] = df.copy() if isinstance(df, pd.DataFrame) else df
         return result
 
     def get_parameter(self, name: str) -> Optional[pd.DataFrame]:
@@ -357,56 +306,8 @@ class ScenarioData:
         >>> capital_cost = data.get_parameter('CapitalCost')
         >>> regions = data.get_parameter('REGION')
         """
-        # Parameter name to attribute mapping
-        param_map = {
-            # Sets
-            'REGION': pd.DataFrame({'VALUE': sorted(self.sets.regions)}),
-            'YEAR': pd.DataFrame({'VALUE': sorted(self.sets.years)}),
-            'TECHNOLOGY': pd.DataFrame({'VALUE': sorted(self.sets.technologies)}),
-            'FUEL': pd.DataFrame({'VALUE': sorted(self.sets.fuels)}),
-            'EMISSION': pd.DataFrame({'VALUE': sorted(self.sets.emissions)}),
-            'MODE_OF_OPERATION': pd.DataFrame({'VALUE': sorted(self.sets.modes)}),
-            'TIMESLICE': pd.DataFrame({'VALUE': sorted(self.sets.timeslices)}),
-            'SEASON': pd.DataFrame({'VALUE': sorted(self.sets.seasons)}),
-            'DAYTYPE': pd.DataFrame({'VALUE': sorted(self.sets.daytypes)}),
-            'DAILYTIMEBRACKET': pd.DataFrame({'VALUE': sorted(self.sets.dailytimebrackets)}),
-            'STORAGE': pd.DataFrame({'VALUE': sorted(self.sets.storages)}),
-            # Time parameters
-            'YearSplit': self.time.year_split,
-            'DaySplit': self.time.day_split,
-            'Conversionls': self.time.conversion_ls,
-            'Conversionld': self.time.conversion_ld,
-            'Conversionlh': self.time.conversion_lh,
-            'DaysInDayType': self.time.days_in_daytype,
-            # Demand parameters
-            'SpecifiedAnnualDemand': self.demand.specified_annual_demand,
-            'SpecifiedDemandProfile': self.demand.specified_demand_profile,
-            'AccumulatedAnnualDemand': self.demand.accumulated_annual_demand,
-            # Supply parameters
-            'ResidualCapacity': self.supply.residual_capacity,
-            'OperationalLife': self.supply.operational_life,
-            # Performance parameters
-            'CapacityToActivityUnit': self.performance.capacity_to_activity_unit,
-            'InputActivityRatio': self.performance.input_activity_ratio,
-            'OutputActivityRatio': self.performance.output_activity_ratio,
-            'CapacityFactor': self.performance.capacity_factor,
-            'AvailabilityFactor': self.performance.availability_factor,
-            # Economics parameters
-            'DiscountRate': self.economics.discount_rate,
-            'DiscountRateIdv': self.economics.discount_rate_idv,
-            'CapitalCost': self.economics.capital_cost,
-            'VariableCost': self.economics.variable_cost,
-            'FixedCost': self.economics.fixed_cost,
-            # Storage parameters
-            'TechnologyToStorage': self.storage.technology_to_storage,
-            'TechnologyFromStorage': self.storage.technology_from_storage,
-            'CapitalCostStorage': self.storage.capital_cost_storage,
-            'OperationalLifeStorage': self.storage.operational_life_storage,
-            'ResidualStorageCapacity': self.storage.residual_storage_capacity,
-            'MinStorageCharge': self.storage.min_storage_charge,
-            'StorageEnergyRatio': self.storage.energy_ratio,
-        }
-        return param_map.get(name)
+        getter = self._PARAM_MAP.get(name)
+        return getter(self) if getter is not None else None
 
     def __getitem__(self, name: str) -> pd.DataFrame:
         """
@@ -440,6 +341,13 @@ class ScenarioData:
     def __contains__(self, name: str) -> bool:
         """Check if parameter name exists."""
         return self.get_parameter(name) is not None
+
+    # ------------------------------------------------------------------
+    # Canonical parameter map — single source of truth for all OSeMOSYS
+    # parameter/set names → ScenarioData getter lambdas.
+    # Used by get_parameter(), to_dict(), and ScenarioDataExporter.
+    # ------------------------------------------------------------------
+    _PARAM_MAP: ClassVar[Dict[str, Callable[['ScenarioData'], pd.DataFrame]]] = {}
 
     @property
     def years_list(self) -> list:
@@ -496,3 +404,56 @@ class ScenarioData:
             f"years={len(self.sets.years)}, "
             f"technologies={len(self.sets.technologies)})"
         )
+
+
+# Populate ScenarioData._PARAM_MAP after the class body so lambdas can use pd.
+# Each entry: OSeMOSYS CSV name → lambda that takes a ScenarioData and returns
+# a pd.DataFrame.  Used by get_parameter(), to_dict(), and ScenarioDataExporter.
+ScenarioData._PARAM_MAP = {
+    # Sets — returned as single-column DataFrames with 'VALUE'
+    'REGION':              lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.regions)}),
+    'YEAR':                lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.years)}),
+    'TECHNOLOGY':          lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.technologies)}),
+    'FUEL':                lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.fuels)}),
+    'EMISSION':            lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.emissions)}),
+    'MODE_OF_OPERATION':   lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.modes)}),
+    'TIMESLICE':           lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.timeslices)}),
+    'SEASON':              lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.seasons)}),
+    'DAYTYPE':             lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.daytypes)}),
+    'DAILYTIMEBRACKET':    lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.dailytimebrackets)}),
+    'STORAGE':             lambda sd: pd.DataFrame({'VALUE': sorted(sd.sets.storages)}),
+    # Time parameters
+    'YearSplit':           lambda sd: sd.time.year_split,
+    'DaySplit':            lambda sd: sd.time.day_split,
+    'Conversionls':        lambda sd: sd.time.conversion_ls,
+    'Conversionld':        lambda sd: sd.time.conversion_ld,
+    'Conversionlh':        lambda sd: sd.time.conversion_lh,
+    'DaysInDayType':       lambda sd: sd.time.days_in_daytype,
+    # Demand parameters
+    'SpecifiedAnnualDemand':    lambda sd: sd.demand.specified_annual_demand,
+    'SpecifiedDemandProfile':   lambda sd: sd.demand.specified_demand_profile,
+    'AccumulatedAnnualDemand':  lambda sd: sd.demand.accumulated_annual_demand,
+    # Supply parameters
+    'ResidualCapacity':    lambda sd: sd.supply.residual_capacity,
+    'OperationalLife':     lambda sd: sd.supply.operational_life,
+    # Performance parameters
+    'CapacityToActivityUnit':  lambda sd: sd.performance.capacity_to_activity_unit,
+    'InputActivityRatio':      lambda sd: sd.performance.input_activity_ratio,
+    'OutputActivityRatio':     lambda sd: sd.performance.output_activity_ratio,
+    'CapacityFactor':          lambda sd: sd.performance.capacity_factor,
+    'AvailabilityFactor':      lambda sd: sd.performance.availability_factor,
+    # Economics parameters
+    'DiscountRate':        lambda sd: sd.economics.discount_rate,
+    'DiscountRateIdv':     lambda sd: sd.economics.discount_rate_idv,
+    'CapitalCost':         lambda sd: sd.economics.capital_cost,
+    'VariableCost':        lambda sd: sd.economics.variable_cost,
+    'FixedCost':           lambda sd: sd.economics.fixed_cost,
+    # Storage parameters
+    'TechnologyToStorage':     lambda sd: sd.storage.technology_to_storage,
+    'TechnologyFromStorage':   lambda sd: sd.storage.technology_from_storage,
+    'CapitalCostStorage':      lambda sd: sd.storage.capital_cost_storage,
+    'OperationalLifeStorage':  lambda sd: sd.storage.operational_life_storage,
+    'ResidualStorageCapacity': lambda sd: sd.storage.residual_storage_capacity,
+    'MinStorageCharge':        lambda sd: sd.storage.min_storage_charge,
+    'StorageEnergyRatio':      lambda sd: sd.storage.energy_ratio,
+}

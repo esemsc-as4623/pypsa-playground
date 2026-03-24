@@ -223,6 +223,19 @@ class SupplyParameters:
             sets.validate_membership(techs, 'technologies', 'in OperationalLife')
             if (self.operational_life['VALUE'] <= 0).any():
                 raise ValueError("OperationalLife must be positive")
+            # Duplicate (REGION, TECHNOLOGY) rows cause silent first-row-wins
+            # behaviour in downstream lookups.
+            dupes = (
+                self.operational_life
+                .groupby(['REGION', 'TECHNOLOGY'])
+                .size()
+            )
+            if (dupes > 1).any():
+                bad = dupes[dupes > 1].index.tolist()
+                raise ValueError(
+                    f"Duplicate OperationalLife entries for: {bad}. "
+                    "Each (REGION, TECHNOLOGY) pair must appear at most once."
+                )
 
         if not self.residual_capacity.empty:
             techs = set(self.residual_capacity['TECHNOLOGY'].unique())
