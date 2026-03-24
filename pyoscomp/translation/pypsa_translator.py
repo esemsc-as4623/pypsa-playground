@@ -118,6 +118,9 @@ class PyPSAInputTranslator(InputTranslator):
         # 7. Add generators (supply + performance + economics)
         self._add_generators()
 
+        # 8. Add storage units (StorageComponent → PyPSA StorageUnit)
+        self._add_storage()
+
         return self.network
 
     # ------------------------------------------------------------------
@@ -453,6 +456,16 @@ class PyPSAInputTranslator(InputTranslator):
             logger.info("No technologies defined, skipping supply")
             return
 
+        # Collect charge/discharge technologies used by storage — they are
+        # folded into StorageUnit objects by _add_storage() and must not
+        # also be added as generators.
+        storage_techs: set = set()
+        stor = self.scenario_data.storage
+        if stor is not None:
+            for df in (stor.technology_to_storage, stor.technology_from_storage):
+                if df is not None and not df.empty and "TECHNOLOGY" in df.columns:
+                    storage_techs.update(df["TECHNOLOGY"].tolist())
+
         years = sorted(self.scenario_data.sets.years)
         discount_rate = self._get_discount_rate()
 
@@ -511,6 +524,13 @@ class PyPSAInputTranslator(InputTranslator):
 
         for region in self.network.buses.index:
             for tech in technologies:
+                if tech in storage_techs:
+                    logger.debug(
+                        f"Skipping {tech} as generator — it is a storage "
+                        f"charge/discharge technology handled by _add_storage()"
+                    )
+                    continue
+
                 # --- Operational Life ---
                 lifetime = self._safe_lookup(
                     op_life, (region, tech), default=25.0
@@ -599,6 +619,271 @@ class PyPSAInputTranslator(InputTranslator):
 
         # Apply time-varying availability
         self.network.generators_t.p_max_pu = p_max_pu
+
+    # ------------------------------------------------------------------
+    # Storage → StorageUnits
+    # ------------------------------------------------------------------
+
+    def _add_storage(self) -> None:
+        """
+        Add storage units from StorageParameters.
+
+        Translation mapping (per storage per region):
+
+        +---------------------------------------+------------------------------+
+        | OSeMOSYS                              | PyPSA StorageUnit            |
+        +=======================================+==============================+
+        | StorageEnergyRatio[r,s]               | max_hours                    |
+        | MinStorageCharge[r,s,y]               | min_stor (first year)        |
+        | OperationalLifeStorage[r,s]           | lifetime                     |
+        | CapitalCostStorage[r,s,y]*max_hours   | capital_cost (combined,      |
+        |   * annuity + CapitalCost[discharge]  |   per MW of discharge cap.)  |
+        |   * annuity + FixedCost[discharge]    |                              |
+        |   + CapitalCost[charge] * annuity     |                              |
+        |   + FixedCost[charge]                 |                              |
+        | 1 / IAR[charge_tech]                  | efficiency_store             |
+        | OAR[discharge_tech]                   | efficiency_dispatch          |
+        | VariableCost[discharge_tech]          | marginal_cost                |
+        | ResidualStorageCapacity[r,s,y]        | e_nom (existing energy MWh)  |
+        |   / StorageEnergyRatio                |   → p_nom (existing MW)      |
+        +---------------------------------------+------------------------------+
+
+        Structural note
+        ---------------
+        OSeMOSYS uses three components (charge tech, storage, discharge tech)
+        with separate costs and lifetimes.  PyPSA uses a single ``StorageUnit``
+        with a combined capital cost.  Total NPV is preserved but cost
+        attribution differs (documented structural disagreement).
+        """
+        storage_params = self.scenario_data.storage
+        storages = sorted(self.scenario_data.sets.storages)
+
+        if not storages:
+            logger.info("No storage defined, skipping storage")
+            return
+
+        years = sorted(self.scenario_data.sets.years)
+        first_year = years[0]
+        discount_rate = self._get_discount_rate()
+        modes = sorted(self.scenario_data.sets.modes)
+        mode = modes[0] if modes else "MODE1"
+
+        # Pre-index storage parameters
+        cap_cost_stor = self._index_df(
+            storage_params.capital_cost_storage,
+            ["REGION", "STORAGE", "YEAR"],
+        )
+        op_life_stor = self._index_df(
+            storage_params.operational_life_storage,
+            ["REGION", "STORAGE"],
+        )
+        residual_stor = self._index_df(
+            storage_params.residual_storage_capacity,
+            ["REGION", "STORAGE", "YEAR"],
+        )
+        min_charge = self._index_df(
+            storage_params.min_storage_charge,
+            ["REGION", "STORAGE", "YEAR"],
+        )
+        energy_ratio = self._index_df(
+            storage_params.energy_ratio,
+            ["REGION", "STORAGE"],
+        )
+
+        # Pre-index technology parameters (reuse supply/economics data)
+        op_life = self._index_df(
+            self.scenario_data.supply.operational_life,
+            ["REGION", "TECHNOLOGY"],
+        )
+        cap_cost = self._index_df(
+            self.scenario_data.economics.capital_cost,
+            ["REGION", "TECHNOLOGY", "YEAR"],
+        )
+        fixed_cost = self._index_df(
+            self.scenario_data.economics.fixed_cost,
+            ["REGION", "TECHNOLOGY", "YEAR"],
+        )
+        var_cost = self._index_df(
+            self.scenario_data.economics.variable_cost,
+            ["REGION", "TECHNOLOGY", "MODE_OF_OPERATION", "YEAR"],
+        )
+        iar_df = self.scenario_data.performance.input_activity_ratio
+        oar_df = self.scenario_data.performance.output_activity_ratio
+
+        for region in self.network.buses.index:
+            for storage_name in storages:
+                charge_tech = self._find_storage_charge_tech(
+                    storage_params.technology_to_storage,
+                    region,
+                    storage_name,
+                    mode,
+                )
+                discharge_tech = self._find_storage_discharge_tech(
+                    storage_params.technology_from_storage,
+                    region,
+                    storage_name,
+                    mode,
+                )
+
+                if discharge_tech is None:
+                    logger.warning(
+                        f"No discharge technology found for storage "
+                        f"{storage_name} in region {region}, skipping"
+                    )
+                    continue
+
+                # --- max_hours (energy capacity ratio) ---
+                max_hours = self._safe_lookup(
+                    energy_ratio, (region, storage_name), default=4.0
+                )
+
+                # --- Lifetime ---
+                life_stor = self._safe_lookup(
+                    op_life_stor, (region, storage_name), default=25.0
+                )
+                life_discharge = self._safe_lookup(
+                    op_life, (region, discharge_tech), default=25.0
+                )
+
+                # --- Existing capacity (from residual storage capacity) ---
+                e_nom = self._safe_lookup(
+                    residual_stor, (region, storage_name, first_year), default=0.0
+                )
+                p_nom = e_nom / max_hours if max_hours > 0 else 0.0
+
+                # --- Minimum state of charge ---
+                min_stor = self._safe_lookup(
+                    min_charge, (region, storage_name, first_year), default=0.0
+                )
+
+                # --- Combined annualized capital cost (per MW discharge) ---
+                # Energy reservoir: CapitalCostStorage[MWh] × max_hours → per MW
+                cc_stor = self._safe_lookup(
+                    cap_cost_stor, (region, storage_name, first_year), default=0.0
+                )
+                ann_stor = cc_stor * max_hours * annuity(discount_rate, life_stor)
+
+                # Discharge technology
+                cc_dis = self._safe_lookup(
+                    cap_cost, (region, discharge_tech, first_year), default=0.0
+                )
+                fc_dis = self._safe_lookup(
+                    fixed_cost, (region, discharge_tech, first_year), default=0.0
+                )
+                ann_discharge = cc_dis * annuity(discount_rate, life_discharge) + fc_dis
+
+                # Charge technology (if present)
+                ann_charge = 0.0
+                if charge_tech is not None:
+                    life_charge = self._safe_lookup(
+                        op_life, (region, charge_tech), default=25.0
+                    )
+                    cc_chg = self._safe_lookup(
+                        cap_cost, (region, charge_tech, first_year), default=0.0
+                    )
+                    fc_chg = self._safe_lookup(
+                        fixed_cost, (region, charge_tech, first_year), default=0.0
+                    )
+                    ann_charge = cc_chg * annuity(discount_rate, life_charge) + fc_chg
+
+                combined_capital_cost = ann_stor + ann_discharge + ann_charge
+
+                # --- Marginal cost from discharge technology ---
+                mc = self._safe_lookup(
+                    var_cost, (region, discharge_tech, mode, first_year), default=0.0
+                )
+
+                # --- Efficiency: 1/IAR for charge, OAR for discharge ---
+                efficiency_store = 1.0
+                if charge_tech is not None and iar_df is not None and not iar_df.empty:
+                    mask = (
+                        (iar_df["REGION"] == region)
+                        & (iar_df["TECHNOLOGY"] == charge_tech)
+                        & (iar_df["MODE_OF_OPERATION"] == mode)
+                        & (iar_df["YEAR"] == first_year)
+                    )
+                    iar_rows = iar_df[mask]
+                    if not iar_rows.empty:
+                        iar_val = float(iar_rows["VALUE"].iloc[0])
+                        if iar_val > 0:
+                            efficiency_store = 1.0 / iar_val
+
+                efficiency_dispatch = 1.0
+                if oar_df is not None and not oar_df.empty:
+                    mask = (
+                        (oar_df["REGION"] == region)
+                        & (oar_df["TECHNOLOGY"] == discharge_tech)
+                        & (oar_df["MODE_OF_OPERATION"] == mode)
+                        & (oar_df["YEAR"] == first_year)
+                    )
+                    oar_rows = oar_df[mask]
+                    if not oar_rows.empty:
+                        efficiency_dispatch = float(oar_rows["VALUE"].iloc[0])
+
+                # --- StorageUnit name (mirrors generator naming convention) ---
+                su_name = (
+                    storage_name
+                    if len(self.network.buses) == 1
+                    else f"{region}_{storage_name}"
+                )
+
+                self.network.add(
+                    "StorageUnit",
+                    su_name,
+                    bus=region,
+                    carrier="AC",
+                    p_nom=p_nom,
+                    p_nom_extendable=True,
+                    max_hours=max_hours,
+                    efficiency_store=efficiency_store,
+                    efficiency_dispatch=efficiency_dispatch,
+                    capital_cost=combined_capital_cost,
+                    marginal_cost=mc,
+                    lifetime=life_stor,
+                    build_year=first_year,
+                    min_stor=min_stor,
+                    cyclic_state_of_charge=True,
+                )
+
+    # ------------------------------------------------------------------
+    # Helpers: find charge / discharge technologies for a storage asset
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _find_storage_charge_tech(
+        technology_to_storage: Optional[pd.DataFrame],
+        region: str,
+        storage_name: str,
+        mode: str,
+    ) -> Optional[str]:
+        """Return the charge technology for a storage asset, or None."""
+        if technology_to_storage is None or technology_to_storage.empty:
+            return None
+        mask = (
+            (technology_to_storage["REGION"] == region)
+            & (technology_to_storage["STORAGE"] == storage_name)
+            & (technology_to_storage["MODE_OF_OPERATION"] == mode)
+        )
+        rows = technology_to_storage[mask]
+        return str(rows["TECHNOLOGY"].iloc[0]) if not rows.empty else None
+
+    @staticmethod
+    def _find_storage_discharge_tech(
+        technology_from_storage: Optional[pd.DataFrame],
+        region: str,
+        storage_name: str,
+        mode: str,
+    ) -> Optional[str]:
+        """Return the discharge technology for a storage asset, or None."""
+        if technology_from_storage is None or technology_from_storage.empty:
+            return None
+        mask = (
+            (technology_from_storage["REGION"] == region)
+            & (technology_from_storage["STORAGE"] == storage_name)
+            & (technology_from_storage["MODE_OF_OPERATION"] == mode)
+        )
+        rows = technology_from_storage[mask]
+        return str(rows["TECHNOLOGY"].iloc[0]) if not rows.empty else None
 
     # ------------------------------------------------------------------
     # Helper: build p_max_pu series
@@ -1118,12 +1403,66 @@ class PyPSAOutputTranslator(OutputTranslator):
         if not production.empty:
             production = production.groupby(cols[:-1], as_index=False)["VALUE"].sum()
 
+        # Curtailment: available energy minus actual dispatch, per snapshot.
+        # Available = p_max_pu × p_nom_opt × weighting (MWh)
+        # Curtailed  = max(0, available − dispatched)
+        curtail_cols = ["REGION", "TIMESLICE", "TECHNOLOGY", "YEAR", "VALUE"]
+        curtailment_rows = []
+        if (
+            not network.generators_t.p.empty
+            and not network.generators_t.p_max_pu.empty
+            and not network.generators.empty
+        ):
+            weights = network.snapshot_weightings.get(
+                "generators", pd.Series(dtype=float)
+            )
+            p_actual = network.generators_t.p
+            p_max_pu = network.generators_t.p_max_pu
+
+            for snapshot in p_actual.index:
+                year, timeslice = PyPSAOutputTranslator._snapshot_year_and_timeslice(
+                    snapshot
+                )
+                w = float(weights.get(snapshot, 1.0)) if not weights.empty else 1.0
+                for gen_name in p_actual.columns:
+                    gen = network.generators.loc[gen_name]
+                    p_nom_opt = float(gen.get("p_nom_opt", gen.get("p_nom", 0.0)))
+                    max_pu = (
+                        float(p_max_pu.loc[snapshot, gen_name])
+                        if gen_name in p_max_pu.columns
+                        else 1.0
+                    )
+                    available = p_nom_opt * max_pu * w
+                    dispatched = float(p_actual.loc[snapshot, gen_name]) * w
+                    curtailed = max(0.0, available - dispatched)
+                    if curtailed > 1e-8:
+                        region = str(gen["bus"])
+                        suffix = f"_{region}"
+                        technology = (
+                            gen_name[: -len(suffix)]
+                            if str(gen_name).endswith(suffix)
+                            else str(gen_name)
+                        )
+                        curtailment_rows.append(
+                            {
+                                "REGION": region,
+                                "TIMESLICE": timeslice,
+                                "TECHNOLOGY": technology,
+                                "YEAR": year,
+                                "VALUE": curtailed,
+                            }
+                        )
+
+        curtailment = pd.DataFrame(curtailment_rows, columns=curtail_cols)
+        if not curtailment.empty:
+            curtailment = curtailment.groupby(
+                curtail_cols[:-1], as_index=False
+            )["VALUE"].sum()
+
         return DispatchResult(
             production=production,
             use=pd.DataFrame(columns=cols),
-            curtailment=pd.DataFrame(
-                columns=["REGION", "TIMESLICE", "TECHNOLOGY", "YEAR", "VALUE"]
-            ),
+            curtailment=curtailment,
             unmet_demand=pd.DataFrame(
                 columns=["REGION", "TIMESLICE", "FUEL", "YEAR", "VALUE"]
             ),
@@ -1210,35 +1549,47 @@ class PyPSAOutputTranslator(OutputTranslator):
                 as_index=False,
             )["VALUE"].sum()
 
+        # Installed capacity tables (power MW and energy MWh), per investment period.
+        if hasattr(network, "investment_periods") and len(network.investment_periods):
+            cap_years = list(network.investment_periods)
+        elif len(network.snapshots) > 0:
+            first_snap = network.snapshots[0]
+            cap_years = [int(first_snap[0]) if isinstance(first_snap, tuple) else int(pd.Timestamp(first_snap).year)]
+        else:
+            cap_years = []
+
+        installed_mw_rows = []
+        installed_mwh_rows = []
+        cap_rows = []  # for equivalent cycles calculation
+        for name, row in network.storage_units.iterrows():
+            region = str(row["bus"])
+            p_nom_opt = float(row.get("p_nom_opt", row.get("p_nom", 0.0)))
+            max_hours = float(row.get("max_hours", 0.0))
+            e_nom_opt = p_nom_opt * max_hours
+            for y in cap_years:
+                installed_mw_rows.append(
+                    {"REGION": region, "STORAGE_TECHNOLOGY": str(name), "YEAR": int(y), "VALUE": p_nom_opt}
+                )
+                installed_mwh_rows.append(
+                    {"REGION": region, "STORAGE_TECHNOLOGY": str(name), "YEAR": int(y), "VALUE": e_nom_opt}
+                )
+            if e_nom_opt > 0:
+                cap_rows.append(
+                    {"REGION": region, "STORAGE_TECHNOLOGY": str(name), "ENERGY_CAPACITY": e_nom_opt}
+                )
+
+        installed_capacity = pd.DataFrame(installed_mw_rows, columns=annual_cols)
+        installed_energy_capacity = pd.DataFrame(installed_mwh_rows, columns=annual_cols)
+
         # Equivalent full cycles proxy: throughput / (2 * energy_capacity).
         cycles = pd.DataFrame(columns=annual_cols)
-        if not throughput.empty and not network.storage_units.empty:
-            cap_rows = []
-            for name, row in network.storage_units.iterrows():
-                region = str(row["bus"])
-                p_nom = float(row.get("p_nom_opt", row.get("p_nom", 0.0)))
-                max_hours = float(row.get("max_hours", 0.0))
-                e_cap = p_nom * max_hours
-                if e_cap <= 0:
-                    continue
-                cap_rows.append(
-                    {
-                        "REGION": region,
-                        "STORAGE_TECHNOLOGY": str(name),
-                        "ENERGY_CAPACITY": e_cap,
-                    }
-                )
-            if cap_rows:
-                cap_df = pd.DataFrame(cap_rows)
-                cycles = throughput.merge(
-                    cap_df,
-                    on=["REGION", "STORAGE_TECHNOLOGY"],
-                    how="left",
-                )
-                cycles["VALUE"] = cycles["VALUE"] / (
-                    2.0 * cycles["ENERGY_CAPACITY"].replace(0, np.nan)
-                )
-                cycles = cycles.drop(columns=["ENERGY_CAPACITY"]).fillna(0.0)
+        if not throughput.empty and cap_rows:
+            cap_df = pd.DataFrame(cap_rows)
+            cycles = throughput.merge(cap_df, on=["REGION", "STORAGE_TECHNOLOGY"], how="left")
+            cycles["VALUE"] = cycles["VALUE"] / (
+                2.0 * cycles["ENERGY_CAPACITY"].replace(0, np.nan)
+            )
+            cycles = cycles.drop(columns=["ENERGY_CAPACITY"]).fillna(0.0)
 
         return StorageResult(
             charge=charge,
@@ -1246,6 +1597,8 @@ class PyPSAOutputTranslator(OutputTranslator):
             state_of_charge=soc,
             throughput=throughput,
             equivalent_cycles=cycles,
+            installed_capacity=installed_capacity,
+            installed_energy_capacity=installed_energy_capacity,
         )
 
     @staticmethod

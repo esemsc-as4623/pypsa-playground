@@ -525,7 +525,17 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
 
     @staticmethod
     def _extract_dispatch(rd: Dict[str, pd.DataFrame]) -> "DispatchResult":
-        """Build DispatchResult from standard OSeMOSYS outputs."""
+        """
+        Build DispatchResult from standard OSeMOSYS outputs.
+
+        OSeMOSYS outputs used:
+        - ``ProductionByTechnology[r,l,t,f,y]`` → production
+        - ``UseByTechnology[r,l,t,f,y]``         → use (fuel consumed)
+        - Curtailment is not a native OSeMOSYS variable; it is left empty
+          unless ``TotalAnnualTechnologyActivityUpperLimit`` CSVs are provided
+          alongside the results, which is uncommon.  Curtailment analysis
+          should instead be performed externally using scenario inputs.
+        """
         from ..interfaces.results import DispatchResult
 
         flow_cols = [
@@ -538,18 +548,21 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
         ]
 
         production = rd.get("ProductionByTechnology", pd.DataFrame())
-        if not production.empty:
+        if not production.empty and all(c in production.columns for c in flow_cols):
             production = production[flow_cols].copy()
         else:
             production = pd.DataFrame(columns=flow_cols)
 
         use = rd.get("UseByTechnology", pd.DataFrame())
-        if not use.empty:
+        if not use.empty and all(c in use.columns for c in flow_cols):
             use = use[flow_cols].copy()
         else:
             use = pd.DataFrame(columns=flow_cols)
 
-        # Not available in default OSeMOSYS outputs unless modeled explicitly.
+        # Curtailment: not a native OSeMOSYS output; left empty.
+        # (To compute curtailment, compare ProductionByTechnology against
+        # CapacityFactor × TotalCapacityAnnual × YearSplit × CAU using
+        # scenario input data alongside results.)
         curtailment = pd.DataFrame(
             columns=["REGION", "TIMESLICE", "TECHNOLOGY", "YEAR", "VALUE"]
         )
@@ -566,66 +579,185 @@ class OSeMOSYSOutputTranslator(OutputTranslator):
 
     @staticmethod
     def _extract_storage(rd: Dict[str, pd.DataFrame]) -> "StorageResult":
-        """Build StorageResult from available OSeMOSYS outputs."""
+        """
+        Build StorageResult from OSeMOSYS storage output variables.
+
+        OSeMOSYS storage outputs used:
+
+        - ``NewStorageCapacity[r,s,y]``          → installed_energy_capacity (MWh, new)
+        - ``AccumulatedNewStorageCapacity[r,s,y]``→ cumulative new energy capacity
+        - ``StorageLevelYearStart[r,s,y]``        → annual state_of_charge proxy
+        - ``StorageLevelDayTypeFinish[r,s,ls,ld,y]`` → timeslice-level SOC (if available)
+
+        Charge / discharge throughput are derived from ``UseByTechnology`` /
+        ``ProductionByTechnology`` for technologies linked to storage via
+        ``TechnologyToStorage`` / ``TechnologyFromStorage``.  Since output
+        CSVs do not carry these linkages, we fall back to using the total
+        activity of technologies whose names contain the ``_CHARGE`` /
+        ``_DISCHARGE`` suffix convention.
+        """
         from ..interfaces.results import StorageResult
 
         annual_cols = ["REGION", "STORAGE_TECHNOLOGY", "YEAR", "VALUE"]
-        throughput = pd.DataFrame(columns=annual_cols)
+        ts_cols = ["REGION", "TIMESLICE", "STORAGE_TECHNOLOGY", "YEAR", "VALUE"]
 
-        annual_activity = rd.get(
-            "TotalTechnologyAnnualActivity", pd.DataFrame()
-        )
-        if not annual_activity.empty:
-            storage_like = annual_activity[
-                annual_activity["TECHNOLOGY"].astype(str).str.contains(
-                    "STOR|BAT", case=False
+        def _rename_storage_col(df: pd.DataFrame, src: str) -> pd.DataFrame:
+            """Rename STORAGE column to STORAGE_TECHNOLOGY."""
+            if src in df.columns:
+                return df.rename(columns={src: "STORAGE_TECHNOLOGY"})
+            return df
+
+        # --- Installed energy capacity (MWh): new additions per year ---
+        new_stor = rd.get("NewStorageCapacity", pd.DataFrame())
+        if not new_stor.empty and "STORAGE" in new_stor.columns:
+            installed_energy = _rename_storage_col(
+                new_stor[["REGION", "STORAGE", "YEAR", "VALUE"]].copy(), "STORAGE"
+            )
+        else:
+            installed_energy = pd.DataFrame(columns=annual_cols)
+
+        # Accumulated (cumulative) storage capacity if available
+        acc_stor = rd.get("AccumulatedNewStorageCapacity", pd.DataFrame())
+        if not acc_stor.empty and "STORAGE" in acc_stor.columns:
+            # Use accumulated as the "installed" total when available
+            installed_energy = _rename_storage_col(
+                acc_stor[["REGION", "STORAGE", "YEAR", "VALUE"]].copy(), "STORAGE"
+            )
+
+        # --- State of charge: StorageLevelYearStart (annual resolution) ---
+        soc_annual = rd.get("StorageLevelYearStart", pd.DataFrame())
+        soc_ts = pd.DataFrame(columns=ts_cols)
+        if not soc_annual.empty and "STORAGE" in soc_annual.columns:
+            # Map to timeslice-level structure using a sentinel TIMESLICE="YEAR_START"
+            soc_yr = _rename_storage_col(
+                soc_annual[["REGION", "STORAGE", "YEAR", "VALUE"]].copy(), "STORAGE"
+            )
+            soc_yr.insert(1, "TIMESLICE", "YEAR_START")
+            soc_ts = soc_yr[ts_cols]
+
+        # Prefer per-daytype SOC if available (richer temporal resolution)
+        soc_dtf = rd.get("StorageLevelDayTypeFinish", pd.DataFrame())
+        if not soc_dtf.empty and "STORAGE" in soc_dtf.columns:
+            # Columns: REGION, STORAGE, SEASON, DAYTYPE, YEAR, VALUE (otoole convention)
+            # Collapse SEASON+DAYTYPE into a synthetic TIMESLICE label
+            soc_dtf = soc_dtf.copy()
+            soc_dtf = _rename_storage_col(soc_dtf, "STORAGE")
+            season_col = next(
+                (c for c in soc_dtf.columns if "SEASON" in c.upper()), None
+            )
+            daytype_col = next(
+                (c for c in soc_dtf.columns if "DAYTYPE" in c.upper()), None
+            )
+            if season_col and daytype_col:
+                soc_dtf["TIMESLICE"] = (
+                    soc_dtf[season_col].astype(str)
+                    + "_"
+                    + soc_dtf[daytype_col].astype(str)
                 )
-            ]
-            if not storage_like.empty:
-                throughput = storage_like[
-                    ["REGION", "TECHNOLOGY", "YEAR", "VALUE"]
-                ].rename(columns={"TECHNOLOGY": "STORAGE_TECHNOLOGY"})
+                soc_ts = soc_dtf[ts_cols]
+
+        # --- Charge / discharge throughput ---
+        # Attempt to use ProductionByTechnology for technologies with DISCHARGE
+        # and UseByTechnology for CHARGE techs (naming convention fallback).
+        prod = rd.get("ProductionByTechnology", pd.DataFrame())
+        use = rd.get("UseByTechnology", pd.DataFrame())
+
+        discharge_rows = []
+        charge_rows = []
+
+        for df, store_list, is_charge in [
+            (prod, discharge_rows, False),
+            (use, charge_rows, True),
+        ]:
+            if df.empty or "TECHNOLOGY" not in df.columns:
+                continue
+            # Heuristic: techs with DISCHARGE or CHARGE in name
+            pattern = "CHARGE" if is_charge else "DISCHARGE"
+            mask = df["TECHNOLOGY"].astype(str).str.contains(pattern, case=False)
+            sub = df[mask]
+            if sub.empty:
+                continue
+            for _, row in sub.iterrows():
+                tech = str(row["TECHNOLOGY"])
+                # Derive storage name: strip _CHARGE / _DISCHARGE suffix
+                stor_name = (
+                    tech.replace("_CHARGE", "").replace("_DISCHARGE", "")
+                       .replace("_CHG", "").replace("_DIS", "")
+                )
+                timeslice = str(row.get("TIMESLICE", "ANNUAL"))
+                store_list.append(
+                    {
+                        "REGION": str(row["REGION"]),
+                        "TIMESLICE": timeslice,
+                        "STORAGE_TECHNOLOGY": stor_name,
+                        "YEAR": int(row["YEAR"]),
+                        "VALUE": float(row["VALUE"]),
+                    }
+                )
+
+        charge = pd.DataFrame(charge_rows, columns=ts_cols)
+        discharge = pd.DataFrame(discharge_rows, columns=ts_cols)
+
+        if not charge.empty:
+            charge = charge.groupby(ts_cols[:-1], as_index=False)["VALUE"].sum()
+        if not discharge.empty:
+            discharge = discharge.groupby(ts_cols[:-1], as_index=False)["VALUE"].sum()
+
+        # Throughput = charge + discharge energy (total energy moved)
+        throughput = pd.DataFrame(columns=annual_cols)
+        if not charge.empty or not discharge.empty:
+            both = pd.concat([charge, discharge], ignore_index=True)
+            throughput = both.groupby(
+                ["REGION", "STORAGE_TECHNOLOGY", "YEAR"], as_index=False
+            )["VALUE"].sum()
 
         return StorageResult(
+            charge=charge,
+            discharge=discharge,
+            state_of_charge=soc_ts,
             throughput=throughput,
+            installed_energy_capacity=installed_energy,
         )
 
     @staticmethod
     def _extract_economics(rd: Dict[str, pd.DataFrame]) -> "EconomicsResult":
-        """Build EconomicsResult from standard OSeMOSYS cost outputs."""
+        """
+        Build EconomicsResult from standard OSeMOSYS cost outputs.
+
+        OSeMOSYS cost outputs used:
+
+        - ``DiscountedCapitalInvestment[r,t,y]``   → capex
+          (``CapitalInvestment`` is undiscounted; we use the discounted
+           version so costs are comparable to PyPSA multi-period objective)
+        - ``AnnualFixedOperatingCost[r,t,y]``      → fixed_opex (undiscounted)
+        - ``AnnualVariableOperatingCost[r,t,y]``   → variable_opex (undiscounted)
+        - ``DiscountedSalvageValue[r,t,y]``        → salvage
+        - ``TotalDiscountedCost[r,y]``             → total_system_cost
+        - ``TotalDiscountedStorageCost[r,s,y]``    → included in total but not
+          disaggregated at technology level (OSeMOSYS tracks storage costs
+          separately; they appear in TotalDiscountedCost)
+        """
         from ..interfaces.results import EconomicsResult
 
         tech_cols = ["REGION", "TECHNOLOGY", "YEAR", "VALUE"]
 
-        capex = rd.get("CapitalInvestment", pd.DataFrame())
-        if not capex.empty:
-            capex = capex[tech_cols].copy()
-        else:
-            capex = pd.DataFrame(columns=tech_cols)
+        def _safe_get(name: str, cols) -> pd.DataFrame:
+            df = rd.get(name, pd.DataFrame())
+            if not df.empty and all(c in df.columns for c in cols):
+                return df[cols].copy()
+            return pd.DataFrame(columns=cols)
 
-        fixed = rd.get("AnnualFixedOperatingCost", pd.DataFrame())
-        if not fixed.empty:
-            fixed = fixed[tech_cols].copy()
-        else:
-            fixed = pd.DataFrame(columns=tech_cols)
+        # Use DiscountedCapitalInvestment for parity with PyPSA objective.
+        # Fall back to undiscounted CapitalInvestment if not available.
+        capex = _safe_get("DiscountedCapitalInvestment", tech_cols)
+        if capex.empty:
+            capex = _safe_get("CapitalInvestment", tech_cols)
 
-        variable = rd.get("AnnualVariableOperatingCost", pd.DataFrame())
-        if not variable.empty:
-            variable = variable[tech_cols].copy()
-        else:
-            variable = pd.DataFrame(columns=tech_cols)
+        fixed = _safe_get("AnnualFixedOperatingCost", tech_cols)
+        variable = _safe_get("AnnualVariableOperatingCost", tech_cols)
+        salvage = _safe_get("DiscountedSalvageValue", tech_cols)
 
-        salvage = rd.get("DiscountedSalvageValue", pd.DataFrame())
-        if not salvage.empty:
-            salvage = salvage[tech_cols].copy()
-        else:
-            salvage = pd.DataFrame(columns=tech_cols)
-
-        total = rd.get("TotalDiscountedCost", pd.DataFrame())
-        if not total.empty:
-            total = total[["REGION", "YEAR", "VALUE"]].copy()
-        else:
-            total = pd.DataFrame(columns=["REGION", "YEAR", "VALUE"])
+        total = _safe_get("TotalDiscountedCost", ["REGION", "YEAR", "VALUE"])
 
         return EconomicsResult(
             capex=capex,
