@@ -100,9 +100,10 @@ class OSeMOSYSInputTranslator(InputTranslator):
         FileExistsError
             If overwrite=False and output_dir contains CSV files.
         """
+        from ..interfaces.utilities import ScenarioDataExporter
+
         output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-        
+
         # Check for existing files if not overwriting
         if not overwrite:
             existing_csvs = list(output_path.glob("*.csv"))
@@ -111,26 +112,10 @@ class OSeMOSYSInputTranslator(InputTranslator):
                     f"Directory {output_dir} contains {len(existing_csvs)} CSV files. "
                     "Use overwrite=True to replace them."
                 )
-        
-        # Get data dictionary
-        data_dict = self.translate()
-        
-        # Write each DataFrame to CSV
-        for name, df in data_dict.items():
-            if df is not None and not df.empty:
-                csv_path = output_path / f"{name}.csv"
-                df.to_csv(csv_path, index=False)
-                logger.debug(f"Wrote {csv_path}")
-            else:
-                # Write empty file with headers for required files
-                csv_path = output_path / f"{name}.csv"
-                # Use empty DataFrame with expected columns
-                pd.DataFrame().to_csv(csv_path, index=False)
-                logger.debug(f"Wrote empty {csv_path}")
-        
+
+        ScenarioDataExporter.to_directory(self.scenario_data, output_dir)
         self.output_dir = str(output_path)
-        logger.info(f"Exported {len(data_dict)} files to {output_dir}")
-        
+        logger.info(f"Exported scenario to {output_dir}")
         return self.output_dir
     
     def get_required_files(self) -> Dict[str, bool]:

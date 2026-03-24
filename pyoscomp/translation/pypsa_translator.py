@@ -190,8 +190,15 @@ class PyPSAInputTranslator(InputTranslator):
         # Derive discount rate (take first region's rate, default 5 %)
         discount_rate = self._get_discount_rate()
 
-        # Period durations (years between consecutive periods)
-        durations = np.diff(years, prepend=years[0]).tolist()
+        # Period durations (years between consecutive periods).
+        # np.diff with prepend=years[0] gives 0 for the first period — wrong.
+        # Instead, use the gap between consecutive years and replicate the last
+        # gap for the final period (or 1 for a single-year model).
+        if len(years) > 1:
+            gaps = [years[i + 1] - years[i] for i in range(len(years) - 1)]
+            durations = gaps + [gaps[-1]]
+        else:
+            durations = [1]
 
         ipw = pd.DataFrame(index=years)
         ipw["years"] = durations
@@ -571,12 +578,29 @@ class PyPSAInputTranslator(InputTranslator):
                     cc * annuity(discount_rate, lifetime) + fc
                 )
 
-                # Variable cost — take first mode, first year
+                # Warn if cost parameters vary across years (learning curves
+                # are not propagated — PyPSA always uses the first-year value).
+                self._warn_if_year_varying(
+                    cap_cost, (region, tech), first_year, years, "CapitalCost"
+                )
+                self._warn_if_year_varying(
+                    fixed_cost, (region, tech), first_year, years, "FixedCost"
+                )
+                self._warn_if_year_varying(
+                    max_cap, (region, tech), first_year, years,
+                    "TotalAnnualMaxCapacity"
+                )
+
+                # Variable cost — prefer MODE1 as canonical operational mode
                 modes = sorted(self.scenario_data.sets.modes)
-                mode = modes[0] if modes else "MODE1"
+                mode = "MODE1" if "MODE1" in modes else (modes[0] if modes else "MODE1")
                 mc = self._safe_lookup(
                     var_cost, (region, tech, mode, first_year),
                     default=0.0,
+                )
+                self._warn_if_year_varying(
+                    var_cost, (region, tech, mode), first_year, years,
+                    "VariableCost"
                 )
 
                 # --- Efficiency from InputActivityRatio ---
@@ -597,7 +621,7 @@ class PyPSAInputTranslator(InputTranslator):
                 )
                 gen_name = f"{tech}" if len(
                     self.network.buses
-                ) == 1 else f"{region}_{tech}"
+                ) == 1 else f"{tech}_{region}"
                 p_max_pu[gen_name] = p_max_pu_series
 
                 # --- Add generator ---
@@ -824,7 +848,7 @@ class PyPSAInputTranslator(InputTranslator):
                 su_name = (
                     storage_name
                     if len(self.network.buses) == 1
-                    else f"{region}_{storage_name}"
+                    else f"{storage_name}_{region}"
                 )
 
                 self.network.add(
@@ -975,26 +999,18 @@ class PyPSAInputTranslator(InputTranslator):
         if iar_idx is None:
             return 1.0
 
-        # Find all fuels for this technology
-        iar_df = self.scenario_data.performance.input_activity_ratio
-        if iar_df.empty:
+        # Use the pre-indexed Series directly — avoids O(n) full-DataFrame scan.
+        # iar_idx is indexed by (REGION, TECHNOLOGY, FUEL, MODE_OF_OPERATION, YEAR).
+        # We slice on all dimensions except FUEL (pick the first available fuel).
+        try:
+            subset = iar_idx.loc[(region, tech, slice(None), mode, year)]
+            if isinstance(subset, pd.Series) and not subset.empty:
+                iar_val = float(subset.iloc[0])
+            else:
+                iar_val = float(subset)
+            return 1.0 / iar_val if iar_val > 0 else 1.0
+        except KeyError:
             return 1.0
-
-        mask = (
-            (iar_df["REGION"] == region)
-            & (iar_df["TECHNOLOGY"] == tech)
-            & (iar_df["MODE_OF_OPERATION"] == mode)
-            & (iar_df["YEAR"] == year)
-        )
-        rows = iar_df[mask]
-        if rows.empty:
-            return 1.0
-
-        # Use first fuel's IAR
-        iar_val = rows["VALUE"].iloc[0]
-        if iar_val > 0:
-            return 1.0 / iar_val
-        return 1.0
 
     # ------------------------------------------------------------------
     # Helper: get output carrier
@@ -1073,6 +1089,56 @@ class PyPSAInputTranslator(InputTranslator):
             return float(indexed.loc[key])
         except (KeyError, TypeError):
             return default
+
+    def _warn_if_year_varying(
+        self,
+        indexed: Optional[pd.Series],
+        key_prefix: tuple,
+        first_year: int,
+        years: list,
+        param_name: str,
+    ) -> None:
+        """Emit a warning if a cost/capacity parameter varies across years.
+
+        Checks whether the value for *key_prefix* + (first_year,) differs from
+        any later year.  Emits a logger warning when it does, because the
+        translator uses only the first-year value and learning curves are
+        therefore invisible to PyPSA.
+
+        Parameters
+        ----------
+        indexed : pd.Series or None
+            Series indexed by (..., YEAR) for the parameter.
+        key_prefix : tuple
+            All index dimensions *except* YEAR, e.g. (region, tech).
+        first_year : int
+        years : list[int]
+        param_name : str
+            Human-readable parameter name for the warning message.
+        """
+        if indexed is None or len(years) < 2:
+            return
+        try:
+            first_val = float(indexed.loc[(*key_prefix, first_year)])
+        except (KeyError, TypeError):
+            return  # parameter not defined for this tech — nothing to warn
+        for y in years[1:]:
+            try:
+                val = float(indexed.loc[(*key_prefix, y)])
+            except (KeyError, TypeError):
+                continue
+            if abs(val - first_val) > 1e-9:
+                logger.warning(
+                    "%s varies across years for %s (using %s value of %.4g; "
+                    "year %s value %.4g not propagated to PyPSA)",
+                    param_name,
+                    key_prefix,
+                    first_year,
+                    first_val,
+                    y,
+                    val,
+                )
+                return  # one warning per tech is enough
 
     @staticmethod
     def _index_df(
@@ -1282,6 +1348,12 @@ class PyPSAOutputTranslator(OutputTranslator):
             network.investment_periods
         ):
             years = list(network.investment_periods)
+            if len(years) > 1:
+                logger.warning(
+                    "Multi-investment-period model detected: _extract_supply "
+                    "reports the same p_nom_opt for all periods. Per-period "
+                    "capacity extraction is not yet implemented."
+                )
         else:
             years = [network.snapshots[0].year]
 
