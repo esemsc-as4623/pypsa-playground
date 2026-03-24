@@ -6,11 +6,13 @@ See otoole documentation: https://otoole.readthedocs.io/en/latest/
 See Pyomo GitHub implementation: https://github.com/OSeMOSYS/OSeMOSYS_Pyomo
 """
 import atexit
+import csv
 import subprocess
 import os
 import tempfile
 from typing import Tuple
 import importlib.resources
+import yaml
 
 from pyoscomp.interfaces import ScenarioData
 from pyoscomp.translation import OSeMOSYSInputTranslator
@@ -80,6 +82,42 @@ class OSeMOSYSRunner:
         runner._tmpdir = tmpdir_obj
         return runner
         
+    def _fill_missing_csvs(self) -> None:
+        """Create empty CSV stubs for config-required params not in SETUP,
+        and reorder columns of existing CSVs to match config indices."""
+        import pandas as pd
+        with open(self.configfile, "r") as f:
+            config = yaml.safe_load(f)
+        for name, meta in config.items():
+            ftype = meta.get("type", "")
+            if ftype not in ("set", "param"):
+                continue
+            csv_path = os.path.join(self.setup_dir, f"{name}.csv")
+            if not os.path.exists(csv_path):
+                # Create empty stub
+                with open(csv_path, "w", newline="") as cf:
+                    writer = csv.writer(cf)
+                    if ftype == "set":
+                        writer.writerow(["VALUE"])
+                    else:
+                        indices = [i.strip() for i in meta.get("indices", [])]
+                        writer.writerow(indices + ["VALUE"])
+            elif ftype == "param":
+                # Reorder columns to match config indices + VALUE
+                indices = [i.strip() for i in meta.get("indices", [])]
+                expected_cols = indices + ["VALUE"]
+                df = pd.read_csv(csv_path)
+                if list(df.columns) != expected_cols and set(df.columns) == set(expected_cols):
+                    df[expected_cols].to_csv(csv_path, index=False)
+
+        # Remove CSVs not in config (otoole rejects unknown files)
+        config_names = set(config.keys())
+        for fname in os.listdir(self.setup_dir):
+            if fname.endswith(".csv"):
+                stem = fname[:-4]
+                if stem not in config_names:
+                    os.remove(os.path.join(self.setup_dir, fname))
+
     def write_input_files_otoole(self) -> Tuple[str, str]:
         """
         Use otoole to convert CSVs to datafile and config.
@@ -93,6 +131,7 @@ class OSeMOSYSRunner:
         -------
         Paths to datafile and configfile.
         """
+        self._fill_missing_csvs()
         input_dir = self.setup_dir
         datafile = os.path.join(self.scenario_dir, f"{self.scenario_name}.txt")
         cmd = [

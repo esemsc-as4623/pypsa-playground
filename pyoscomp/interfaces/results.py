@@ -59,6 +59,11 @@ def _check_non_negative(
         )
 
 
+def _to_numeric_fillna_zero(series: pd.Series) -> pd.Series:
+    """Coerce to numeric and replace missing values with zero."""
+    return pd.to_numeric(series, errors="coerce").fillna(0.0)
+
+
 # ------------------------------------------------------------------
 # TopologyResult
 # ------------------------------------------------------------------
@@ -806,8 +811,8 @@ def _compare_supply(
         on=join_cols,
         how="outer",
     )
-    merged[col_a] = merged[col_a].fillna(0.0)
-    merged[col_b] = merged[col_b].fillna(0.0)
+    merged[col_a] = _to_numeric_fillna_zero(merged[col_a])
+    merged[col_b] = _to_numeric_fillna_zero(merged[col_b])
     merged["DIFF"] = merged[col_a] - merged[col_b]
     # Relative + absolute tolerance: match if |diff| <= max(0.1, 1% * max(|a|, |b|))
     scale = np.maximum(np.abs(merged[col_a]), np.abs(merged[col_b]))
@@ -883,8 +888,8 @@ def _compare_optional_value_table(
         on=join_cols,
         how="outer",
     )
-    merged[col_a] = merged[col_a].fillna(0.0)
-    merged[col_b] = merged[col_b].fillna(0.0)
+    merged[col_a] = _to_numeric_fillna_zero(merged[col_a])
+    merged[col_b] = _to_numeric_fillna_zero(merged[col_b])
     merged["DIFF"] = merged[col_a] - merged[col_b]
     # Relative + absolute tolerance: match if |diff| <= max(0.1, 1% * max(|a|, |b|))
     scale = np.maximum(np.abs(merged[col_a]), np.abs(merged[col_b]))

@@ -174,7 +174,11 @@ def save_param_csv(
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
+    # Ensure VALUE column is last (otoole expects indices then VALUE)
+    cols = [c for c in df.columns if c != "VALUE"]
+    if "VALUE" in df.columns:
+        cols.append("VALUE")
+    df[cols].to_csv(path, index=False)
 
 
 # =============================================================================
