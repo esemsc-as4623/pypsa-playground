@@ -5,8 +5,10 @@ Executes the OSeMOSYS model using translated input data. Option to use otoole or
 See otoole documentation: https://otoole.readthedocs.io/en/latest/
 See Pyomo GitHub implementation: https://github.com/OSeMOSYS/OSeMOSYS_Pyomo
 """
+import atexit
 import subprocess
 import os
+import tempfile
 from typing import Tuple
 import importlib.resources
 
@@ -65,13 +67,18 @@ class OSeMOSYSRunner:
         OSeMOSYSRunner
             Configured runner instance
         """
-        import tempfile
-        scenario_dir = tempfile.mkdtemp(prefix="pyoscomp_osemosys_")
+        tmpdir_obj = tempfile.TemporaryDirectory(prefix="pyoscomp_osemosys_")
+        atexit.register(tmpdir_obj.cleanup)
+        scenario_dir = tmpdir_obj.name
         setup_dir = os.path.join(scenario_dir, "SETUP")
         os.makedirs(setup_dir, exist_ok=True)
         translator = OSeMOSYSInputTranslator(scenario_data)
         translator.export_to_csv(setup_dir)
-        return cls(scenario_dir=scenario_dir, use_otoole=use_otoole)
+        runner = cls(scenario_dir=scenario_dir, use_otoole=use_otoole)
+        # Keep reference so the TemporaryDirectory isn't garbage-collected
+        # while the runner is still alive.
+        runner._tmpdir = tmpdir_obj
+        return runner
         
     def write_input_files_otoole(self) -> Tuple[str, str]:
         """
