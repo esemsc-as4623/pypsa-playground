@@ -27,21 +27,21 @@ authoring and model-specific translators/runners.
 
 ```mermaid
 flowchart LR
-		A[Scenario Components] --> B[ScenarioDataLoader]
-		B --> C[ScenarioData\nimmutable]
-		C --> D[validate()]
-		C --> E[validate_harmonization()]
-		C --> F[to_dict/export_to_directory]
+	A[Scenario Components] --> B[ScenarioDataLoader]
+	B --> C[ScenarioData\nimmutable]
+	C --> D["validate()"]
+	C --> E["validate_harmonization()"]
+	C --> F[to_dict/export_to_directory]
 ```
 
 ## Output-Side Data Contract
 
 ```mermaid
 flowchart LR
-		A[PyPSAOutputTranslator] --> C[ModelResults]
-		B[OSeMOSYSOutputTranslator] --> C
-		C --> D[compare()]
-		C --> E[divergence_analysis()]
+	A[PyPSAOutputTranslator] --> C[ModelResults]
+	B[OSeMOSYSOutputTranslator] --> C
+	C --> D["compare()"]
+	C --> E["divergence_analysis()"]
 ```
 
 ## Typical Usage
