@@ -397,6 +397,103 @@ class EconomicsParameters:
         if not self.variable_cost.empty:
             techs = set(self.variable_cost['TECHNOLOGY'].unique())
             sets.validate_membership(techs, 'technologies', 'in VariableCost')
-            
+
             modes = set(self.variable_cost['MODE_OF_OPERATION'].unique())
             sets.validate_membership(modes, 'modes', 'in VariableCost')
+
+
+@dataclass(frozen=True)
+class StorageParameters:
+    """
+    Storage parameters owned by StorageComponent.
+
+    Attributes
+    ----------
+    technology_to_storage : pd.DataFrame
+        TechnologyToStorage[r,t,s,m] - Binary: charge technology → storage link.
+        Columns: REGION, TECHNOLOGY, STORAGE, MODE_OF_OPERATION, VALUE
+    technology_from_storage : pd.DataFrame
+        TechnologyFromStorage[r,t,s,m] - Binary: storage → discharge technology link.
+        Columns: REGION, TECHNOLOGY, STORAGE, MODE_OF_OPERATION, VALUE
+    capital_cost_storage : pd.DataFrame
+        CapitalCostStorage[r,s,y] - Capital cost per MWh of storage capacity.
+        Columns: REGION, STORAGE, YEAR, VALUE
+    operational_life_storage : pd.DataFrame
+        OperationalLifeStorage[r,s] - Storage facility lifetime in years.
+        Columns: REGION, STORAGE, VALUE
+    residual_storage_capacity : pd.DataFrame
+        ResidualStorageCapacity[r,s,y] - Pre-installed storage energy capacity (MWh).
+        Columns: REGION, STORAGE, YEAR, VALUE
+    min_storage_charge : pd.DataFrame
+        MinStorageCharge[r,s,y] - Minimum state of charge fraction [0, 1].
+        Columns: REGION, STORAGE, YEAR, VALUE
+    energy_ratio : pd.DataFrame
+        StorageEnergyRatio[r,s] - Energy-to-power ratio (max_hours for PyPSA).
+        Non-standard: ignored by otoole, read by PyPSA translator.
+        Columns: REGION, STORAGE, VALUE
+
+    Notes
+    -----
+    All storage fields are optional (empty DataFrames if no storage defined).
+    The energy_ratio field has no OSeMOSYS equivalent — it is used exclusively
+    by the PyPSA translator to set StorageUnit.max_hours.
+    """
+    technology_to_storage: pd.DataFrame = field(default_factory=_empty_df)
+    technology_from_storage: pd.DataFrame = field(default_factory=_empty_df)
+    capital_cost_storage: pd.DataFrame = field(default_factory=_empty_df)
+    operational_life_storage: pd.DataFrame = field(default_factory=_empty_df)
+    residual_storage_capacity: pd.DataFrame = field(default_factory=_empty_df)
+    min_storage_charge: pd.DataFrame = field(default_factory=_empty_df)
+    energy_ratio: pd.DataFrame = field(default_factory=_empty_df)
+
+    CSV_MAPPING = {
+        'technology_to_storage': 'TechnologyToStorage.csv',
+        'technology_from_storage': 'TechnologyFromStorage.csv',
+        'capital_cost_storage': 'CapitalCostStorage.csv',
+        'operational_life_storage': 'OperationalLifeStorage.csv',
+        'residual_storage_capacity': 'ResidualStorageCapacity.csv',
+        'min_storage_charge': 'MinStorageCharge.csv',
+        'energy_ratio': 'StorageEnergyRatio.csv',
+    }
+
+    def validate(self, sets: 'OSeMOSYSSets') -> None:
+        """
+        Validate storage parameter references.
+
+        Raises
+        ------
+        ValueError
+            If referenced storages/technologies/regions/years not in sets.
+        """
+        if not self.technology_to_storage.empty:
+            techs = set(self.technology_to_storage['TECHNOLOGY'].unique())
+            sets.validate_membership(techs, 'technologies', 'in TechnologyToStorage')
+            storages = set(self.technology_to_storage['STORAGE'].unique())
+            sets.validate_membership(storages, 'storages', 'in TechnologyToStorage')
+
+        if not self.technology_from_storage.empty:
+            techs = set(self.technology_from_storage['TECHNOLOGY'].unique())
+            sets.validate_membership(techs, 'technologies', 'in TechnologyFromStorage')
+            storages = set(self.technology_from_storage['STORAGE'].unique())
+            sets.validate_membership(storages, 'storages', 'in TechnologyFromStorage')
+
+        if not self.capital_cost_storage.empty:
+            storages = set(self.capital_cost_storage['STORAGE'].unique())
+            sets.validate_membership(storages, 'storages', 'in CapitalCostStorage')
+            if (self.capital_cost_storage['VALUE'] < 0).any():
+                raise ValueError("CapitalCostStorage cannot be negative")
+
+        if not self.operational_life_storage.empty:
+            storages = set(self.operational_life_storage['STORAGE'].unique())
+            sets.validate_membership(storages, 'storages', 'in OperationalLifeStorage')
+            if (self.operational_life_storage['VALUE'] <= 0).any():
+                raise ValueError("OperationalLifeStorage must be positive")
+
+        if not self.min_storage_charge.empty:
+            vals = self.min_storage_charge['VALUE']
+            if (vals < 0).any() or (vals > 1).any():
+                raise ValueError("MinStorageCharge must be in [0, 1]")
+
+        if not self.energy_ratio.empty:
+            if (self.energy_ratio['VALUE'] <= 0).any():
+                raise ValueError("StorageEnergyRatio (max_hours) must be positive")

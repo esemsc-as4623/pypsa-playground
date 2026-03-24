@@ -15,6 +15,7 @@ from .parameters import (
     SupplyParameters,
     EconomicsParameters,
     PerformanceParameters,
+    StorageParameters,
 )
 from .containers import ScenarioData
 from .utilities import (
@@ -34,6 +35,8 @@ from .results import (
     TradeResult,
     ModelResults,
     compare,
+    DivergenceFlag,
+    divergence_analysis,
 )
 from .harmonization import (
     HarmonizationTolerances,
@@ -54,6 +57,7 @@ __all__ = [
     'SupplyParameters',
     'PerformanceParameters',
     'EconomicsParameters',
+    'StorageParameters',
     # Input container
     'ScenarioData',
     # Output containers
@@ -66,6 +70,8 @@ __all__ = [
     'ModelResults',
     # Comparison
     'compare',
+    'DivergenceFlag',
+    'divergence_analysis',
     # Harmonization protocol
     'HarmonizationTolerances',
     'MetricResult',

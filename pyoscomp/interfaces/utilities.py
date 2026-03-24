@@ -25,6 +25,7 @@ from .parameters import (
     SupplyParameters,
     PerformanceParameters,
     EconomicsParameters,
+    StorageParameters,
 )
 
 if TYPE_CHECKING:
@@ -302,6 +303,17 @@ class ScenarioDataLoader:
             fixed_cost=load_param_csv(path / 'FixedCost.csv'),
         )
 
+        # Load storage parameters (all optional)
+        storage_params = StorageParameters(
+            technology_to_storage=load_param_csv(path / 'TechnologyToStorage.csv'),
+            technology_from_storage=load_param_csv(path / 'TechnologyFromStorage.csv'),
+            capital_cost_storage=load_param_csv(path / 'CapitalCostStorage.csv'),
+            operational_life_storage=load_param_csv(path / 'OperationalLifeStorage.csv'),
+            residual_storage_capacity=load_param_csv(path / 'ResidualStorageCapacity.csv'),
+            min_storage_charge=load_param_csv(path / 'MinStorageCharge.csv'),
+            energy_ratio=load_param_csv(path / 'StorageEnergyRatio.csv'),
+        )
+
         # Create ScenarioData (validation runs in __post_init__ if validate=True)
         return ScenarioData(
             sets=sets,
@@ -310,6 +322,7 @@ class ScenarioDataLoader:
             supply=supply_params,
             performance=performance_params,
             economics=economics_params,
+            storage=storage_params,
             metadata={'source_dir': scenario_dir},
             _skip_validation=not validate,
             _strict_protocol=strict_protocol,
@@ -324,6 +337,7 @@ class ScenarioDataLoader:
         supply_component,
         performance_component,
         economics_component,
+        storage_component=None,
         validate: bool = True,
         strict_protocol: bool = False,
         harmonization_tolerances: 'HarmonizationTolerances' = None,
@@ -368,7 +382,9 @@ class ScenarioDataLoader:
             seasons=frozenset(time_component.seasons_df['VALUE'].tolist()),
             daytypes=frozenset(time_component.daytypes_df['VALUE'].tolist()),
             dailytimebrackets=frozenset(time_component.brackets_df['VALUE'].tolist()),
-            storages=frozenset(),  # Future: StorageComponent
+            storages=frozenset(
+                storage_component.storages if storage_component is not None else []
+            ),
         )
 
         # Extract time parameters
@@ -414,6 +430,20 @@ class ScenarioDataLoader:
             fixed_cost=economics_component.fixed_cost.copy(),
         )
 
+        # Extract storage parameters
+        if storage_component is not None:
+            storage_params = StorageParameters(
+                technology_to_storage=storage_component.technology_to_storage.copy(),
+                technology_from_storage=storage_component.technology_from_storage.copy(),
+                capital_cost_storage=storage_component.capital_cost_storage.copy(),
+                operational_life_storage=storage_component.operational_life_storage.copy(),
+                residual_storage_capacity=storage_component.residual_storage_capacity.copy(),
+                min_storage_charge=storage_component.min_storage_charge.copy(),
+                energy_ratio=storage_component.energy_ratio.copy(),
+            )
+        else:
+            storage_params = StorageParameters()
+
         return ScenarioData(
             sets=sets,
             time=time_params,
@@ -421,6 +451,7 @@ class ScenarioDataLoader:
             supply=supply_params,
             performance=performance_params,
             economics=economics_params,
+            storage=storage_params,
             metadata={'source': 'components'},
             _skip_validation=not validate,
             _strict_protocol=strict_protocol,
@@ -511,3 +542,12 @@ class ScenarioDataExporter:
         save_param_csv(data.economics.capital_cost, path / 'CapitalCost.csv')
         save_param_csv(data.economics.variable_cost, path / 'VariableCost.csv')
         save_param_csv(data.economics.fixed_cost, path / 'FixedCost.csv')
+
+        # Export storage parameters (all optional)
+        save_param_csv(data.storage.technology_to_storage, path / 'TechnologyToStorage.csv')
+        save_param_csv(data.storage.technology_from_storage, path / 'TechnologyFromStorage.csv')
+        save_param_csv(data.storage.capital_cost_storage, path / 'CapitalCostStorage.csv')
+        save_param_csv(data.storage.operational_life_storage, path / 'OperationalLifeStorage.csv')
+        save_param_csv(data.storage.residual_storage_capacity, path / 'ResidualStorageCapacity.csv')
+        save_param_csv(data.storage.min_storage_charge, path / 'MinStorageCharge.csv')
+        save_param_csv(data.storage.energy_ratio, path / 'StorageEnergyRatio.csv')

@@ -25,6 +25,7 @@ from .parameters import (
     SupplyParameters,
     PerformanceParameters,
     EconomicsParameters,
+    StorageParameters,
 )
 
 if TYPE_CHECKING:
@@ -87,6 +88,7 @@ class ScenarioData:
     supply: SupplyParameters
     performance: PerformanceParameters
     economics: EconomicsParameters
+    storage: StorageParameters = field(default_factory=StorageParameters)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     # Internal flag to skip validation (used by loaders during construction)
@@ -126,6 +128,7 @@ class ScenarioData:
         self.supply.validate(self.sets)
         self.performance.validate(self.sets)
         self.economics.validate(self.sets)
+        self.storage.validate(self.sets)
 
         strict = self._strict_protocol if strict_protocol is None else strict_protocol
         if strict:
@@ -198,6 +201,7 @@ class ScenarioData:
         supply_component,
         performance_component,
         economics_component,
+        storage_component=None,
         validate: bool = True,
         strict_protocol: bool = False,
         harmonization_tolerances: Optional['HarmonizationTolerances'] = None,
@@ -221,6 +225,8 @@ class ScenarioData:
             Component with performance data (activity ratios, factors).
         economics_component : EconomicsComponent
             Component with cost data.
+        storage_component : StorageComponent, optional
+            Component with storage facility definitions (default: None).
         validate : bool, optional
             If True, run validation after construction (default: True).
 
@@ -237,6 +243,7 @@ class ScenarioData:
             supply_component,
             performance_component,
             economics_component,
+            storage_component=storage_component,
             validate=validate,
             strict_protocol=strict_protocol,
             harmonization_tolerances=harmonization_tolerances,
@@ -320,6 +327,15 @@ class ScenarioData:
         result['VariableCost'] = self.economics.variable_cost.copy()
         result['FixedCost'] = self.economics.fixed_cost.copy()
 
+        # Storage parameters
+        result['TechnologyToStorage'] = self.storage.technology_to_storage.copy()
+        result['TechnologyFromStorage'] = self.storage.technology_from_storage.copy()
+        result['CapitalCostStorage'] = self.storage.capital_cost_storage.copy()
+        result['OperationalLifeStorage'] = self.storage.operational_life_storage.copy()
+        result['ResidualStorageCapacity'] = self.storage.residual_storage_capacity.copy()
+        result['MinStorageCharge'] = self.storage.min_storage_charge.copy()
+        result['StorageEnergyRatio'] = self.storage.energy_ratio.copy()
+
         return result
 
     def get_parameter(self, name: str) -> Optional[pd.DataFrame]:
@@ -381,6 +397,14 @@ class ScenarioData:
             'CapitalCost': self.economics.capital_cost,
             'VariableCost': self.economics.variable_cost,
             'FixedCost': self.economics.fixed_cost,
+            # Storage parameters
+            'TechnologyToStorage': self.storage.technology_to_storage,
+            'TechnologyFromStorage': self.storage.technology_from_storage,
+            'CapitalCostStorage': self.storage.capital_cost_storage,
+            'OperationalLifeStorage': self.storage.operational_life_storage,
+            'ResidualStorageCapacity': self.storage.residual_storage_capacity,
+            'MinStorageCharge': self.storage.min_storage_charge,
+            'StorageEnergyRatio': self.storage.energy_ratio,
         }
         return param_map.get(name)
 

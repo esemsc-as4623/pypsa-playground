@@ -26,7 +26,7 @@ frozen dataclass with:
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 
 def _empty_df() -> pd.DataFrame:
@@ -359,6 +359,11 @@ class StorageResult:
     standing_loss: pd.DataFrame = field(default_factory=_empty_df)
     throughput: pd.DataFrame = field(default_factory=_empty_df)
     equivalent_cycles: pd.DataFrame = field(default_factory=_empty_df)
+    # Capacity results (populated by output translators after optimisation)
+    installed_capacity: pd.DataFrame = field(default_factory=_empty_df)
+    """Power capacity (MW).  Columns: REGION, STORAGE_TECHNOLOGY, YEAR, VALUE."""
+    installed_energy_capacity: pd.DataFrame = field(default_factory=_empty_df)
+    """Energy capacity (MWh).  Columns: REGION, STORAGE_TECHNOLOGY, YEAR, VALUE."""
 
     _TIMESLICE_COLS = frozenset(
         {
@@ -391,7 +396,7 @@ class StorageResult:
             )
             _check_non_negative(df, f"StorageResult.{name}")
 
-        for name in ("throughput", "equivalent_cycles"):
+        for name in ("throughput", "equivalent_cycles", "installed_capacity", "installed_energy_capacity"):
             df = getattr(self, name)
             if df.empty:
                 continue
@@ -661,10 +666,24 @@ def compare(
         join_cols=["REGION", "TIMESLICE", "TECHNOLOGY", "FUEL", "YEAR"],
     )
 
-    # --- storage comparison (throughput only for now) ---
+    # --- storage comparisons ---
     result["storage_throughput"] = _compare_optional_value_table(
         a.storage.throughput,
         b.storage.throughput,
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "STORAGE_TECHNOLOGY", "YEAR"],
+    )
+    result["storage_installed_capacity"] = _compare_optional_value_table(
+        a.storage.installed_capacity,
+        b.storage.installed_capacity,
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "STORAGE_TECHNOLOGY", "YEAR"],
+    )
+    result["storage_installed_energy_capacity"] = _compare_optional_value_table(
+        a.storage.installed_energy_capacity,
+        b.storage.installed_energy_capacity,
         a.model_name,
         b.model_name,
         join_cols=["REGION", "STORAGE_TECHNOLOGY", "YEAR"],
@@ -687,6 +706,37 @@ def compare(
         b.model_name,
         join_cols=["REGION", "TO_REGION", "TIMESLICE", "FUEL", "YEAR"],
     )
+
+    # --- annual production comparison (timeslice-aggregated) ---
+    result["dispatch_annual_production"] = _compare_optional_value_table(
+        _aggregate_annual(a.dispatch.production, ["TIMESLICE"]),
+        _aggregate_annual(b.dispatch.production, ["TIMESLICE"]),
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "TECHNOLOGY", "FUEL", "YEAR"],
+    )
+
+    # --- curtailment comparison ---
+    result["dispatch_curtailment"] = _compare_optional_value_table(
+        _aggregate_annual(a.dispatch.curtailment, ["TIMESLICE"]),
+        _aggregate_annual(b.dispatch.curtailment, ["TIMESLICE"]),
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "TECHNOLOGY", "YEAR"],
+    )
+
+    # --- economics cost component comparisons ---
+    for component in ("capex", "fixed_opex", "variable_opex", "salvage"):
+        result[f"economics_{component}"] = _compare_optional_value_table(
+            getattr(a.economics, component),
+            getattr(b.economics, component),
+            a.model_name,
+            b.model_name,
+            join_cols=["REGION", "TECHNOLOGY", "YEAR"],
+        )
+
+    # --- effective capacity factor ---
+    result["effective_capacity_factor"] = _compare_effective_capacity_factor(a, b)
 
     return result
 
@@ -759,9 +809,42 @@ def _compare_supply(
     merged[col_a] = merged[col_a].fillna(0.0)
     merged[col_b] = merged[col_b].fillna(0.0)
     merged["DIFF"] = merged[col_a] - merged[col_b]
-    merged["MATCH"] = np.abs(merged["DIFF"]) < 1e-4
+    # Relative + absolute tolerance: match if |diff| <= max(0.1, 1% * max(|a|, |b|))
+    scale = np.maximum(np.abs(merged[col_a]), np.abs(merged[col_b]))
+    merged["MATCH"] = np.abs(merged["DIFF"]) <= np.maximum(0.1, 0.01 * scale)
 
     return merged.sort_values(join_cols).reset_index(drop=True)
+
+
+def _aggregate_annual(
+    df: pd.DataFrame,
+    drop_cols: List[str],
+) -> pd.DataFrame:
+    """
+    Collapse timeslice-level dispatch table to annual totals.
+
+    Removes columns in *drop_cols* from the groupby key and sums VALUE.
+    If any drop_col is absent the DataFrame is returned unchanged (it may
+    already be annual-level).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dispatch table with a VALUE column.
+    drop_cols : list[str]
+        Columns to collapse (e.g. ``['TIMESLICE']``).
+
+    Returns
+    -------
+    pd.DataFrame
+        Aggregated DataFrame, or empty DataFrame if input is empty.
+    """
+    if df.empty:
+        return df
+    group_cols = [c for c in df.columns if c not in drop_cols and c != "VALUE"]
+    if not group_cols:
+        return df
+    return df.groupby(group_cols, as_index=False)["VALUE"].sum()
 
 
 def _compare_optional_value_table(
@@ -803,6 +886,245 @@ def _compare_optional_value_table(
     merged[col_a] = merged[col_a].fillna(0.0)
     merged[col_b] = merged[col_b].fillna(0.0)
     merged["DIFF"] = merged[col_a] - merged[col_b]
-    merged["MATCH"] = np.abs(merged["DIFF"]) < 1e-4
+    # Relative + absolute tolerance: match if |diff| <= max(0.1, 1% * max(|a|, |b|))
+    scale = np.maximum(np.abs(merged[col_a]), np.abs(merged[col_b]))
+    merged["MATCH"] = np.abs(merged["DIFF"]) <= np.maximum(0.1, 0.01 * scale)
 
     return merged.sort_values(join_cols).reset_index(drop=True)
+
+
+def _compare_effective_capacity_factor(
+    a: "ModelResults",
+    b: "ModelResults",
+) -> pd.DataFrame:
+    """
+    Compute and compare effective capacity factor: annual energy / (capacity × 8760).
+
+    Effective CF = ProductionByTechnology (annual sum) / (installed_capacity × 8760).
+
+    Returns a comparison table with columns:
+        REGION, TECHNOLOGY, YEAR, <a.model_name>, <b.model_name>, DIFF, MATCH.
+    """
+    hours_per_year = 8760.0
+
+    def _eff_cf(results: "ModelResults") -> pd.DataFrame:
+        prod = _aggregate_annual(results.dispatch.production, ["TIMESLICE", "FUEL"])
+        cap = results.supply.installed_capacity
+        if prod.empty or cap.empty:
+            return pd.DataFrame()
+        merged = pd.merge(
+            prod,
+            cap.rename(columns={"VALUE": "CAPACITY"}),
+            on=["REGION", "TECHNOLOGY", "YEAR"],
+            how="inner",
+        )
+        merged = merged[merged["CAPACITY"] > 0].copy()
+        merged["VALUE"] = merged["VALUE"] / (merged["CAPACITY"] * hours_per_year)
+        return merged[["REGION", "TECHNOLOGY", "YEAR", "VALUE"]]
+
+    ecf_a = _eff_cf(a)
+    ecf_b = _eff_cf(b)
+    if ecf_a.empty and ecf_b.empty:
+        return pd.DataFrame()
+    return _compare_optional_value_table(
+        ecf_a,
+        ecf_b,
+        a.model_name,
+        b.model_name,
+        join_cols=["REGION", "TECHNOLOGY", "YEAR"],
+    )
+
+
+# ------------------------------------------------------------------
+# divergence_analysis() — structured report on output divergence
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DivergenceFlag:
+    """
+    Single divergence finding from ``divergence_analysis()``.
+
+    Attributes
+    ----------
+    category : str
+        Short identifier for the divergence domain.
+    description : str
+        Human-readable description of what diverged.
+    n_mismatches : int
+        Number of rows in the comparison table that did not match.
+    max_abs_diff : float
+        Largest absolute difference observed.
+    max_rel_diff : float
+        Largest relative difference (as a fraction of the larger value).
+    structural : bool
+        True when the divergence is expected from a known structural
+        disagreement (e.g. temporal aggregation, cost accounting).
+    """
+
+    category: str
+    description: str
+    n_mismatches: int
+    max_abs_diff: float
+    max_rel_diff: float
+    structural: bool = False
+
+    def __str__(self) -> str:
+        flag = "[STRUCTURAL]" if self.structural else "[DIVERGENCE]"
+        return (
+            f"{flag} {self.category}: {self.description}\n"
+            f"  mismatches={self.n_mismatches}, "
+            f"max_abs={self.max_abs_diff:.4g}, "
+            f"max_rel={self.max_rel_diff:.4g}"
+        )
+
+
+def divergence_analysis(
+    a: "ModelResults",
+    b: "ModelResults",
+    *,
+    capacity_tol: float = 0.02,
+    dispatch_tol: float = 0.05,
+    cost_tol: float = 0.05,
+) -> Tuple[List[DivergenceFlag], Dict[str, pd.DataFrame]]:
+    """
+    Produce a structured report of output divergence between two models.
+
+    Runs ``compare()`` internally and categorizes mismatches by domain,
+    distinguishing between *structural* disagreements (known, expected) and
+    *unexplained* divergences that warrant investigation.
+
+    Known structural disagreements:
+
+    1. **Temporal aggregation** — OSeMOSYS uses timeslice-averaged capacity
+       factors; PyPSA sees the full hour-by-hour variability.
+    2. **Cost accounting** — OSeMOSYS uses lump-sum + salvage; PyPSA uses
+       annualized costs.
+    3. **Storage inter-year** — OSeMOSYS cannot carry energy across year
+       boundaries; PyPSA can.
+    4. **Storage component model** — OSeMOSYS has three components; PyPSA
+       collapses them into one StorageUnit (combined NPV, different attribution).
+    5. **Curtailment** — Not a native OSeMOSYS variable.
+
+    Parameters
+    ----------
+    a, b : ModelResults
+        Two sets of model results to compare.
+    capacity_tol : float
+        Relative tolerance for capacity comparison (default 2%).
+    dispatch_tol : float
+        Relative tolerance for annual dispatch comparison (default 5%).
+    cost_tol : float
+        Relative tolerance for cost comparison (default 5%).
+
+    Returns
+    -------
+    flags : list[DivergenceFlag]
+        Ordered list of divergence findings. Non-structural (unexplained)
+        flags appear before structural ones.
+    tables : dict[str, pd.DataFrame]
+        All comparison tables from ``compare()``, for detailed inspection.
+    """
+    tables = compare(a, b)
+    flags: List[DivergenceFlag] = []
+
+    def _flag_from_table(
+        key: str,
+        category: str,
+        description: str,
+        structural: bool,
+        tol: float,
+    ) -> None:
+        df = tables.get(key, pd.DataFrame())
+        if df.empty or "MATCH" not in df.columns:
+            return
+        col_a = a.model_name
+        col_b = b.model_name
+        mismatches = int((~df["MATCH"]).sum())
+        if mismatches == 0:
+            return
+        abs_diff = df["DIFF"].abs()
+        max_abs = float(abs_diff.max())
+        scale_vals = np.maximum(
+            df[col_a].abs() if col_a in df.columns else pd.Series(0.0, index=df.index),
+            df[col_b].abs() if col_b in df.columns else pd.Series(0.0, index=df.index),
+        )
+        rel = abs_diff / pd.Series(scale_vals).replace(0, np.nan)
+        max_rel = float(rel.max(skipna=True)) if not rel.isna().all() else 0.0
+        if max_rel >= tol or max_abs >= 0.1:
+            flags.append(
+                DivergenceFlag(
+                    category=category,
+                    description=description,
+                    n_mismatches=mismatches,
+                    max_abs_diff=max_abs,
+                    max_rel_diff=max_rel,
+                    structural=structural,
+                )
+            )
+
+    _flag_from_table(
+        "supply", "capacity", "Installed generation capacity disagrees",
+        structural=False, tol=capacity_tol,
+    )
+    _flag_from_table(
+        "storage_installed_capacity", "storage_capacity_mw",
+        "Installed storage power capacity (MW) disagrees",
+        structural=False, tol=capacity_tol,
+    )
+    _flag_from_table(
+        "storage_installed_energy_capacity", "storage_capacity_mwh",
+        "Installed storage energy capacity (MWh) disagrees",
+        structural=False, tol=capacity_tol,
+    )
+    _flag_from_table(
+        "dispatch_annual_production", "dispatch",
+        "Annual production disagrees — likely temporal aggregation effect",
+        structural=True, tol=dispatch_tol,
+    )
+    _flag_from_table(
+        "dispatch_curtailment", "curtailment",
+        "Curtailment disagrees — PyPSA has native curtailment; OSeMOSYS does not",
+        structural=True, tol=dispatch_tol,
+    )
+    _flag_from_table(
+        "economics_total_system_cost", "economics",
+        "Total system cost disagrees — cost accounting differs structurally",
+        structural=True, tol=cost_tol,
+    )
+    _flag_from_table(
+        "economics_capex", "capex",
+        "Capital expenditure disagrees — lump-sum vs annualized cost accounting",
+        structural=True, tol=cost_tol,
+    )
+    _flag_from_table(
+        "effective_capacity_factor", "effective_cf",
+        "Effective capacity factor disagrees — reflects dispatch divergence",
+        structural=True, tol=dispatch_tol,
+    )
+
+    # Check objective value divergence directly
+    obj_a = a.objective
+    obj_b = b.objective
+    if obj_a != 0.0 or obj_b != 0.0:
+        scale_obj = max(abs(obj_a), abs(obj_b))
+        rel_obj = abs(obj_a - obj_b) / scale_obj if scale_obj > 0 else 0.0
+        if rel_obj >= cost_tol:
+            flags.append(
+                DivergenceFlag(
+                    category="objective",
+                    description=(
+                        f"Objective values differ: {a.model_name}={obj_a:.4g}, "
+                        f"{b.model_name}={obj_b:.4g} (rel={rel_obj:.2%}). "
+                        "Expected: OSeMOSYS lump-sum + salvage vs PyPSA annualized."
+                    ),
+                    n_mismatches=1,
+                    max_abs_diff=abs(obj_a - obj_b),
+                    max_rel_diff=rel_obj,
+                    structural=True,
+                )
+            )
+
+    # Sort: non-structural first (unexplained), then by magnitude
+    flags.sort(key=lambda f: (f.structural, -f.max_rel_diff))
+    return flags, tables

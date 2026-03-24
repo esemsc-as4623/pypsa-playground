@@ -158,39 +158,37 @@ def validate_input_harmonization(
             )
         )
 
-    # Technology lifetime coverage and positivity.
+    # Technology lifetime coverage: every technology must have at least one
+    # OperationalLife entry (any region is sufficient).  Requiring all
+    # region×tech pairs is too strict — a single-region scenario always has
+    # full coverage, but a multi-region scenario may legitimately omit
+    # technologies from some regions.
     life = scenario_data.supply.operational_life
-    expected_pairs = {
-        (region, tech)
-        for region in scenario_data.sets.regions
-        for tech in scenario_data.sets.technologies
-    }
+    expected_techs = set(scenario_data.sets.technologies)
     if life is None or life.empty:
-        missing = len(expected_pairs)
+        missing_techs = expected_techs
         report.add(
             MetricResult(
                 name="operational_life_coverage",
                 passed=False,
-                observed=float(missing),
+                observed=float(len(missing_techs)),
                 expected=0.0,
                 tolerance=0.0,
-                details={"missing_pairs": missing},
+                details={"missing_technologies": sorted(missing_techs)[:5]},
             )
         )
     else:
-        provided_pairs = set(
-            zip(life["REGION"], life["TECHNOLOGY"])
-        )
-        missing_pairs = expected_pairs - provided_pairs
+        covered_techs = set(life["TECHNOLOGY"])
+        missing_techs = expected_techs - covered_techs
         report.add(
             MetricResult(
                 name="operational_life_coverage",
-                passed=(len(missing_pairs) == 0),
-                observed=float(len(missing_pairs)),
+                passed=(len(missing_techs) == 0),
+                observed=float(len(missing_techs)),
                 expected=0.0,
                 tolerance=0.0,
                 details={
-                    "missing_examples": sorted(list(missing_pairs))[:5],
+                    "missing_technologies": sorted(missing_techs)[:5],
                 },
             )
         )
@@ -381,6 +379,44 @@ def validate_pypsa_translation_harmonization(
         )
     )
 
+    # Storage translation checks (only if storages are defined).
+    n_storages = len(scenario_data.sets.storages)
+    if n_storages > 0:
+        n_sus = len(network.storage_units)
+        report.add(
+            MetricResult(
+                name="storage_unit_count",
+                passed=(n_sus == n_storages),
+                observed=float(n_sus),
+                expected=float(n_storages),
+                tolerance=0.0,
+                details={"reason": "one StorageUnit per STORAGE entry expected"},
+            )
+        )
+
+        max_hours_err = _max_storage_max_hours_error(scenario_data, network)
+        report.add(
+            MetricResult(
+                name="storage_max_hours_translation",
+                passed=max_hours_err <= tol.atol_cost,
+                observed=max_hours_err,
+                expected=0.0,
+                tolerance=tol.atol_cost,
+            )
+        )
+
+        roundtrip_err = _max_storage_roundtrip_error(scenario_data, network)
+        report.add(
+            MetricResult(
+                name="storage_roundtrip_efficiency",
+                passed=roundtrip_err <= tol.atol_cost,
+                observed=roundtrip_err,
+                expected=0.0,
+                tolerance=tol.atol_cost,
+                details={"reason": "product of efficiency_store * efficiency_dispatch"},
+            )
+        )
+
     return report
 
 
@@ -402,7 +438,11 @@ def reconstruct_pypsa_npv(
     Assumptions:
 
     - Depreciation method equivalent to OSeMOSYS method 1 is used.
-    - Technology emissions penalties and storage costs are excluded.
+    - Technology emissions penalties are excluded.
+    - Storage costs use ``CapitalCostStorage × max_hours × annuity`` for the
+      energy reservoir; charge/discharge tech costs are already folded into
+      the PyPSA ``capital_cost`` by the input translator and are not
+      double-counted here (only the storage energy reservoir is reconstructed).
     """
     return float(_reconstruct_pypsa_npv_components(scenario_data, network)["total"])
 
@@ -514,6 +554,62 @@ def _reconstruct_pypsa_npv_components(
                 build_year,
                 year_end,
             )
+            salvage_value = capital_investment * salvage_factor
+            total_salvage += salvage_value / ((1.0 + rate) ** horizon_years)
+
+    # Storage units (annualized costs already folded into capital_cost by the
+    # input translator; reconstruct here via the same OSeMOSYS accounting).
+    stor_cap_df = getattr(
+        getattr(scenario_data, "storage", None), "capital_cost_storage", None
+    )
+    stor_life_df = getattr(
+        getattr(scenario_data, "storage", None), "operational_life_storage", None
+    )
+    energy_ratio_df = getattr(
+        getattr(scenario_data, "storage", None), "energy_ratio", None
+    )
+    stor_cap_idx = _safe_index(stor_cap_df, ["REGION", "STORAGE", "YEAR"])
+    stor_life_idx = _safe_index(stor_life_df, ["REGION", "STORAGE"])
+    er_idx = _safe_index(energy_ratio_df, ["REGION", "STORAGE"])
+
+    for su_name, row in network.storage_units.iterrows():
+        region, storage = _infer_region_tech(
+            su_name, regions, single_region=single_region
+        )
+        build_year = int(row.get("build_year", year0))
+        lifetime = float(
+            _lookup(stor_life_idx, (region, storage), default=float(row.get("lifetime", 25.0)))
+        )
+        max_hours = float(row.get("max_hours", 0.0))
+        total_p_nom = float(row.get("p_nom_opt", row.get("p_nom", 0.0)))
+        existing_p_nom = float(row.get("p_nom", 0.0))
+        new_p_nom = max(0.0, total_p_nom - existing_p_nom)
+
+        rate = float(_lookup(dr_idx, (region,), default=_scenario_discount_rate(scenario_data)))
+        stor_capex_per_mwh = float(_lookup(stor_cap_idx, (region, storage, build_year), default=0.0))
+
+        # Capital investment for storage energy reservoir (converted to per-MW-discharge basis)
+        capital_investment = (
+            stor_capex_per_mwh
+            * max_hours
+            * new_p_nom
+            * _capital_recovery_factor(rate, lifetime)
+            * _pv_annuity(rate, lifetime)
+        )
+        total_capex += capital_investment / ((1.0 + rate) ** (build_year - year0))
+
+        # Operating costs: use marginal_cost from network (variable) and fixed via storage_units
+        for y in years:
+            annual_fixed = total_p_nom * float(row.get("standing_loss", 0.0))
+            annual_variable = float(
+                _storage_unit_energy_dispatched(network, su_name, y, weights)
+            ) * float(row.get("marginal_cost", 0.0))
+            annual_operating = annual_fixed + annual_variable
+            total_opex += annual_operating / ((1.0 + rate) ** (y - year0 + 0.5))
+
+        # Salvage value
+        if lifetime > 0 and (build_year + lifetime - 1) > year_end:
+            salvage_factor = _salvage_fraction(rate, lifetime, build_year, year_end)
             salvage_value = capital_investment * salvage_factor
             total_salvage += salvage_value / ((1.0 + rate) ** horizon_years)
 
@@ -899,6 +995,135 @@ def _wind_translation_metrics(
             )
         )
     return corr, float(max(stat_errs))
+
+
+def _storage_unit_energy_dispatched(
+    network,
+    su_name: str,
+    year: int,
+    weights: pd.Series,
+) -> float:
+    """Compute weighted annual discharge energy for a StorageUnit."""
+    if network.storage_units_t.p.empty or su_name not in network.storage_units_t.p:
+        return 0.0
+    series = network.storage_units_t.p[su_name]
+    # Positive p_value = discharging (convention in PyPSA StorageUnit)
+    discharge = series.clip(lower=0.0)
+    if isinstance(series.index, pd.MultiIndex):
+        mask = series.index.get_level_values(0) == year
+        if not np.any(mask):
+            return 0.0
+        year_series = discharge[mask]
+        year_weights = weights.reindex(year_series.index).fillna(0.0)
+        return float((year_series * year_weights).sum())
+    year_weights = weights.reindex(discharge.index).fillna(0.0)
+    return float((discharge * year_weights).sum())
+
+
+def _max_storage_max_hours_error(scenario_data, network) -> float:
+    """Max absolute error in max_hours vs StorageEnergyRatio."""
+    energy_ratio_df = getattr(
+        getattr(scenario_data, "storage", None), "energy_ratio", None
+    )
+    if energy_ratio_df is None or energy_ratio_df.empty or network.storage_units.empty:
+        return 0.0
+    er_idx = _safe_index(energy_ratio_df, ["REGION", "STORAGE"])
+    regions = sorted(scenario_data.sets.regions)
+    single_region = len(regions) == 1
+    max_err = 0.0
+    for su_name, row in network.storage_units.iterrows():
+        region, storage = _infer_region_tech(su_name, regions, single_region)
+        expected = _lookup(er_idx, (region, storage), default=float(row.get("max_hours", 0.0)))
+        observed = float(row.get("max_hours", 0.0))
+        max_err = max(max_err, abs(observed - expected))
+    return float(max_err)
+
+
+def _max_storage_roundtrip_error(scenario_data, network) -> float:
+    """
+    Max absolute error in round-trip efficiency vs expected from IAR/OAR.
+
+    Expected round-trip = (1/IAR_charge) * OAR_discharge.
+    PyPSA observed = efficiency_store * efficiency_dispatch.
+    """
+    if network.storage_units.empty:
+        return 0.0
+    stor_params = getattr(scenario_data, "storage", None)
+    if stor_params is None:
+        return 0.0
+    t2s = stor_params.technology_to_storage
+    f2s = stor_params.technology_from_storage
+    if (t2s is None or t2s.empty) and (f2s is None or f2s.empty):
+        return 0.0
+
+    years = sorted(scenario_data.sets.years)
+    first_year = years[0] if years else 0
+    modes = sorted(scenario_data.sets.modes)
+    mode = modes[0] if modes else "MODE1"
+    iar_df = scenario_data.performance.input_activity_ratio
+    oar_df = scenario_data.performance.output_activity_ratio
+    regions = sorted(scenario_data.sets.regions)
+    single_region = len(regions) == 1
+
+    max_err = 0.0
+    for su_name, row in network.storage_units.iterrows():
+        region, storage = _infer_region_tech(su_name, regions, single_region)
+
+        # Find charge/discharge techs
+        charge_tech = None
+        if t2s is not None and not t2s.empty:
+            mask = (
+                (t2s["REGION"] == region)
+                & (t2s["STORAGE"] == storage)
+                & (t2s["MODE_OF_OPERATION"] == mode)
+            )
+            rows = t2s[mask]
+            if not rows.empty:
+                charge_tech = str(rows["TECHNOLOGY"].iloc[0])
+
+        discharge_tech = None
+        if f2s is not None and not f2s.empty:
+            mask = (
+                (f2s["REGION"] == region)
+                & (f2s["STORAGE"] == storage)
+                & (f2s["MODE_OF_OPERATION"] == mode)
+            )
+            rows = f2s[mask]
+            if not rows.empty:
+                discharge_tech = str(rows["TECHNOLOGY"].iloc[0])
+
+        # Expected efficiency from IAR/OAR
+        eff_store_exp = 1.0
+        if charge_tech and iar_df is not None and not iar_df.empty:
+            mask = (
+                (iar_df["REGION"] == region)
+                & (iar_df["TECHNOLOGY"] == charge_tech)
+                & (iar_df["MODE_OF_OPERATION"] == mode)
+                & (iar_df["YEAR"] == first_year)
+            )
+            iar_rows = iar_df[mask]
+            if not iar_rows.empty:
+                iar_val = float(iar_rows["VALUE"].iloc[0])
+                if iar_val > 0:
+                    eff_store_exp = 1.0 / iar_val
+
+        eff_dispatch_exp = 1.0
+        if discharge_tech and oar_df is not None and not oar_df.empty:
+            mask = (
+                (oar_df["REGION"] == region)
+                & (oar_df["TECHNOLOGY"] == discharge_tech)
+                & (oar_df["MODE_OF_OPERATION"] == mode)
+                & (oar_df["YEAR"] == first_year)
+            )
+            oar_rows = oar_df[mask]
+            if not oar_rows.empty:
+                eff_dispatch_exp = float(oar_rows["VALUE"].iloc[0])
+
+        expected_rt = eff_store_exp * eff_dispatch_exp
+        observed_rt = float(row.get("efficiency_store", 1.0)) * float(row.get("efficiency_dispatch", 1.0))
+        max_err = max(max_err, abs(observed_rt - expected_rt))
+
+    return float(max_err)
 
 
 def _safe_corr(x: pd.Series, y: pd.Series) -> float:
