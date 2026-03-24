@@ -11,6 +11,7 @@ from .demand import DemandComponent
 from .supply import SupplyComponent, TechnologyBuilder
 from .performance import PerformanceComponent
 from .economics import EconomicsComponent
+from .storage import StorageComponent, StorageBuilder
 
 __all__ = [
     'ScenarioComponent',
@@ -21,4 +22,6 @@ __all__ = [
     'TechnologyBuilder',
     'PerformanceComponent',
     'EconomicsComponent',
+    'StorageComponent',
+    'StorageBuilder',
 ]
